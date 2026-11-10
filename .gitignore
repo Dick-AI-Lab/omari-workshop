@@ -1,0 +1,15 @@
+node_modules/
+website/dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+checkpoints/
+runs/
+artifacts/
+*.pth
+*.pt
+.ipynb_checkpoints/
+# exported bundles can be large; commit deliberately if you want to publish one
+website/public/experiments/*
+!website/public/experiments/README.md

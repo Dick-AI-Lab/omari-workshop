@@ -1,0 +1,43 @@
+# Artifact export for the website. Paths are relative to the repository root; ${VARS} are expanded.
+bundle_id: omari-fpdb-v1
+data_root: ${DATA_ROOT}                       # folder containing FETAL_PLANES_DB_data.csv and Images/
+split_manifest: artifacts/splits/split_manifest.csv
+output_dir: website/public/experiments
+max_side: 640                                # exported sample images are capped; sample predictions use these exact pixels
+
+models:
+  densenet161: {checkpoint: runs/densenet161_finetune_lf1_s0/best.pt}
+  vit_b16:     {checkpoint: runs/vit_b16_finetune_lf1_s0/best.pt}
+  usf_mae:
+    checkpoint: runs/usf_mae_finetune_lf1_s0/best.pt
+    pretrain_checkpoint: checkpoints/usf_mae_100ep.pth   # needed only for MAE reconstructions (decoder weights)
+    notes: "FETAL_PLANES_DB images (unlabelled) were part of USF-MAE pretraining (OpenUS-46)."
+
+samples:
+  split: test
+  per_class: 2
+  disagreements: 6
+  misclassified_per_model: 2
+  opening: null        # set to an Image_name to fix the Chapter 1 image
+  seed: 0
+
+features:        {enabled: true, channels: 12, layers: [features.denseblock1, features.denseblock2, features.denseblock3, features.denseblock4]}
+attention:       {enabled: true, full_for: opening, blocks_full: [0, 5, 11]}
+attributions:    {enabled: true, methods: all, all_layers: true}
+reconstructions: {enabled: true, ratios: [0.25, 0.5, 0.75, 0.9], seeds: [0]}
+perturbations:   {enabled: true, seed: 0, occlude_top: true}
+
+evaluation:
+  runs:
+    densenet161: runs/densenet161_finetune_lf1_s0
+    vit_b16: runs/vit_b16_finetune_lf1_s0
+    usf_mae: runs/usf_mae_finetune_lf1_s0
+  curve_runs:
+    densenet161: {frozen: runs/densenet161_frozen_lf1_s0, finetune: runs/densenet161_finetune_lf1_s0}
+    vit_b16:     {frozen: runs/vit_b16_frozen_lf1_s0, finetune: runs/vit_b16_finetune_lf1_s0}
+    usf_mae:     {frozen: runs/usf_mae_frozen_lf1_s0, finetune: runs/usf_mae_finetune_lf1_s0}
+  label_efficiency_glob: runs/*_lf*_s*/summary.json
+  label_efficiency_regime: frozen
+  export_test_probabilities: true
+  bootstrap: 1000
+  max_misclassified: 24

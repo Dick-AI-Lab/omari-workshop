@@ -1,0 +1,20 @@
+# Python ≥ 3.9. GPU strongly recommended for training (CUDA build of torch from pytorch.org if needed).
+torch>=2.1
+torchvision>=0.16
+timm>=0.9.12
+numpy>=1.24
+pandas>=2.0
+scikit-learn>=1.3
+scipy>=1.10
+pillow>=10
+matplotlib>=3.7
+pyyaml>=6
+tqdm>=4.66
+opencv-python-headless>=4.8   # inpainting of burned-in overlays (falls back to median fill without it)
+gdown>=5.1                    # USF-MAE checkpoint from Google Drive
+fastapi>=0.110                # optional live-inference server
+uvicorn>=0.27
+pytest>=8                     # tests
+nbformat>=5.9                 # notebook generation / checks
+nbclient>=0.10
+ipykernel>=6

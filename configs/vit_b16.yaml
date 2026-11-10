@@ -1,0 +1,15 @@
+# Vanilla ViT-B/16 — timm vit_base_patch16_224.augreg_in1k (supervised ImageNet-1k, AugReg recipe).
+# NOT an MAE model. Layer-wise lr decay as for USF-MAE so the two ViTs share an optimisation recipe.
+model: vit_b16
+timm_name: vit_base_patch16_224.augreg_in1k
+regimes:
+  frozen:   {epochs: 15, lr: 1.0e-3, batch_size: 64, weight_decay: 0.0, warmup_epochs: 1}
+  finetune: {epochs: 25, lr: 2.0e-4, batch_size: 32, weight_decay: 0.05, warmup_epochs: 3, layer_decay: 0.75}
+loss: weighted_ce
+weight_scheme: inverse
+label_smoothing: 0.1
+patience: 6
+input: {size: 224, resize: stretch, interpolation: bicubic, mean: [0.5, 0.5, 0.5], std: [0.5, 0.5, 0.5]}
+augment: {rotation: 10, scale: [0.85, 1.0], hflip: 0.5, brightness: 0.15, contrast: 0.15}
+label_fractions: [0.01, 0.05, 0.1, 0.25, 0.5, 1.0]
+seeds: [0, 1, 2]

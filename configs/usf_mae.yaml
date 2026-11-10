@@ -1,0 +1,17 @@
+# USF-MAE — encoder from the official 100-epoch checkpoint (Google Drive id 1ZPu_7KhMEuaq-XdLhVp2EEgMgLJ4dKhr,
+# linked from https://github.com/Yusufii9/USF-MAE). Preprocessing copies the official loader:
+# Resize((224,224), NEAREST) + ImageNet mean/std. Fine-tuning recipe follows MAE (He et al. 2022).
+model: usf_mae
+checkpoint: checkpoints/usf_mae_100ep.pth
+global_pool: token      # 'avg' reproduces MAE's default fine-tuning head (mean-pooled tokens + fc_norm)
+regimes:
+  frozen:   {epochs: 15, lr: 1.0e-3, batch_size: 64, weight_decay: 0.0, warmup_epochs: 1}
+  finetune: {epochs: 25, lr: 2.0e-4, batch_size: 32, weight_decay: 0.05, warmup_epochs: 3, layer_decay: 0.75}
+loss: weighted_ce
+weight_scheme: inverse
+label_smoothing: 0.1
+patience: 6
+input: {size: 224, resize: stretch, interpolation: nearest, mean: [0.485, 0.456, 0.406], std: [0.229, 0.224, 0.225]}
+augment: {rotation: 10, scale: [0.85, 1.0], hflip: 0.5, brightness: 0.15, contrast: 0.15}
+label_fractions: [0.01, 0.05, 0.1, 0.25, 0.5, 1.0]
+seeds: [0, 1, 2]

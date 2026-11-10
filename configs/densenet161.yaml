@@ -1,0 +1,14 @@
+# DenseNet-161 — torchvision DenseNet161_Weights.IMAGENET1K_V1 (supervised ImageNet-1k).
+# Two regimes are run with identical splits; values follow common fine-tuning practice for CNNs.
+model: densenet161
+regimes:
+  frozen:   {epochs: 15, lr: 1.0e-3, batch_size: 64, weight_decay: 1.0e-4, warmup_epochs: 1}
+  finetune: {epochs: 25, lr: 3.0e-4, batch_size: 32, weight_decay: 1.0e-4, warmup_epochs: 1, backbone_lr_mult: 0.1}
+loss: weighted_ce
+weight_scheme: inverse
+label_smoothing: 0.1
+patience: 6
+input: {size: 224, resize: stretch, interpolation: bilinear, mean: [0.485, 0.456, 0.406], std: [0.229, 0.224, 0.225]}
+augment: {rotation: 10, scale: [0.85, 1.0], hflip: 0.5, brightness: 0.15, contrast: 0.15}
+label_fractions: [0.01, 0.05, 0.1, 0.25, 0.5, 1.0]
+seeds: [0, 1, 2]
