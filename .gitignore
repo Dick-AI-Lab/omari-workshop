@@ -13,3 +13,17 @@ artifacts/
 # exported bundles can be large; commit deliberately if you want to publish one
 website/public/experiments/*
 !website/public/experiments/README.md
+
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.env
+.env.*
+!.env.example
+data/
+artifacts/
+runs/
+*.pt
+*.pth
+*.ckpt
+*.safetensors

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # From Pixels to Predictions
 
 **Developing AI models for medical image interpretation.** An interactive, research-grade two-hour workshop for the Ottawa Medical AI Research Institute (OMARI) Seminar Series.
@@ -63,3 +64,4 @@ See `docs/VALIDATION_REPORT.md` for what was executed and what remains to be don
 ## Licence
 
 Code: MIT. FETAL_PLANES_DB: CC BY 4.0 (attribution required for exported images). See `LICENSE` and `docs/DATA_AND_MODEL_SOURCES.md`.
+=======
