@@ -1,8 +1,13 @@
-# USF-MAE — encoder from the official 100-epoch checkpoint (Google Drive id 1ZPu_7KhMEuaq-XdLhVp2EEgMgLJ4dKhr,
-# linked from https://github.com/Yusufii9/USF-MAE). Preprocessing copies the official loader:
-# Resize((224,224), NEAREST) + ImageNet mean/std. Fine-tuning recipe follows MAE (He et al. 2022).
+# USF-MAE — encoder from the official 500-epoch checkpoint `usf_mae_500ep.pth`
+# (Google Drive id 15n71qHXSBjEjrLtCOzvBb6gTsGhh7NUg, linked from https://github.com/Yusufii9/USF-MAE).
+# All 19 reported USF-MAE runs were initialised from this file. The 100-epoch checkpoint (usf_mae_100ep.pth,
+# Drive id 1ZPu_7KhMEuaq-XdLhVp2EEgMgLJ4dKhr) is historical only (original bundle reconstructions).
+# Pinned hashes: omari_us.models.usf_mae.USF_MAE_CHECKPOINTS.
+# Preprocessing copies the official loader: Resize((224,224), NEAREST) + ImageNet mean/std.
+# Fine-tuning recipe follows MAE (He et al. 2022).
 model: usf_mae
-checkpoint: checkpoints/usf_mae_100ep.pth
+checkpoint: checkpoints/usf_mae_500ep.pth
+checkpoint_sha256: c659a06170b0f6967ae7f6d066681b8dea2c122a5f325bb8a82df11ffb3a2533   # informational; verified on load
 global_pool: token      # 'avg' reproduces MAE's default fine-tuning head (mean-pooled tokens + fc_norm)
 regimes:
   frozen:   {epochs: 15, lr: 1.0e-3, batch_size: 64, weight_decay: 0.0, warmup_epochs: 1}

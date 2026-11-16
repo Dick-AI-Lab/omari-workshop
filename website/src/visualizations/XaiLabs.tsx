@@ -5,7 +5,8 @@ import { Empty, Figure, GrayCanvas, MODEL_META, Seg, Slider } from '../component
 import { loadGrayPNG, useArtifacts } from '../data/artifacts';
 import { useImageSource } from '../data/imageSource';
 import { CLASS_SHORT } from '../data/literature';
-import type { AttributionEntry, ModelId } from '../data/types';
+import type { AttributionEntry, ModelId, SampleInfo } from '../data/types';
+import { layerDepth, layerLabel, layerShort, methodLong, methodShort } from '../data/labels';
 import { ColormapName, cssGradient } from '../lib/colormaps';
 import { Gray, resize } from '../lib/imageOps';
 import { TOY_CHANNELS, ToyMethod, toyAttribution, toyDeletionCurve, toyFeatureMaps, toyScore, unitScale } from '../lib/toyModels';
@@ -17,7 +18,7 @@ export const METHOD_INFO: Record<string, { name: string; models: ModelId[]; kind
   vit_gradcam: { name: 'Grad-CAM (tokens)', models: ['vit_b16', 'usf_mae'], kind: 'class-gradient', status: 'implemented', note: 'Applied to patch tokens of a late block, reshaped 196 → 14×14; [CLS] dropped.' },
   vit_gradcampp: { name: 'Grad-CAM++ (tokens)', models: ['vit_b16', 'usf_mae'], kind: 'class-gradient', status: 'implemented', note: 'Same token reshape as above.' },
   attention_rollout: { name: 'Attention rollout', models: ['vit_b16', 'usf_mae'], kind: 'attention', status: 'implemented', note: 'Products of (A + I)/2 across blocks. Not class-specific.' },
-  chefer: { name: 'Gradient-weighted rollout', models: ['vit_b16', 'usf_mae'], kind: 'class-gradient', status: 'implemented', note: 'Rollout of ReLU(∇A ⊙ A) averaged over heads (Chefer et al. 2021, simplified, no LRP).' },
+  grad_rollout: { name: 'Gradient-weighted attention rollout', models: ['vit_b16', 'usf_mae'], kind: 'class-gradient', status: 'implemented', note: 'Rollout of head-averaged ReLU(∇A ⊙ A) across blocks. A simplified variant inspired by Chefer et al. (2021) without layer-wise relevance propagation (LRP); exported as “chefer” in schema 1.0 bundles.' },
   metacampp: { name: 'MetaCAM++', models: ['densenet161', 'vit_b16', 'usf_mae'], kind: 'reserved', status: 'reserved', note: 'Research method in development. Integration interface only; no implementation or results included.' },
 };
 
@@ -83,14 +84,36 @@ export function CamToy({ shortcut = false }: { shortcut?: boolean }) {
 /* ------------------------------------------------------------------ */
 function useHeat(path?: string) {
   const [g, setG] = useState<Gray | null>(null);
-  useEffect(() => { let c = false; setG(null); if (path) loadGrayPNG(path).then((x) => !c && setG(x)).catch(() => {}); return () => { c = true; }; }, [path]);
-  return g;
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    let c = false; setG(null); setErr(false);
+    if (path) loadGrayPNG(path).then((x) => !c && setG(x)).catch((e) => { console.error('[xai] heatmap', path, e); if (!c) setErr(true); });
+    return () => { c = true; };
+  }, [path]);
+  return { g, err };
 }
 
-function HeatTile({ base, entry, opacity, cmap, threshold, label }: { base: Gray; entry?: AttributionEntry; opacity: number; cmap: ColormapName; threshold: number; label: string }) {
-  const heat = useHeat(entry?.png);
+const fmtRaw = (v: number) => (Math.abs(v) >= 100 || (Math.abs(v) < 0.01 && v !== 0) ? v.toExponential(2) : v.toFixed(3));
+
+function HeatTile({ base, entry, opacity, cmap, threshold, label, note }: { base: Gray; entry?: AttributionEntry; opacity: number; cmap: ColormapName; threshold: number; label: string; note?: string }) {
+  const { g: heat, err } = useHeat(entry?.png);
   if (!entry) return <div><Empty title="not exported">{label}</Empty></div>;
-  return <GrayCanvas img={base} overlay={heat ? { heat, opacity, cmap, threshold } : undefined} label={label} />;
+  if (err) return <div><Empty title="heatmap file could not be loaded" error>{entry.png}</Empty></div>;
+  return (
+    <div>
+      <GrayCanvas img={base} overlay={heat ? { heat, opacity, cmap, threshold } : undefined} label={label} />
+      <div className="small muted" style={{ fontFamily: 'var(--sans)', marginTop: '0.2rem' }}>
+        {entry.layer_label ?? layerLabel(entry.model, entry.layer)} · {entry.resolution.join('×')} · raw range [{fmtRaw(entry.raw_min)}, {fmtRaw(entry.raw_max)}]{note ? ` · ${note}` : ''}
+      </div>
+    </div>
+  );
+}
+
+/** cross-architecture method equivalents (CNN ↔ token version); attention methods only exist for ViTs */
+function equivalentMethod(method: string, to: ModelId): string {
+  const vit = to !== 'densenet161';
+  if (vit) return method === 'cam' ? 'vit_gradcam' : method.startsWith('vit_') || ['attention_rollout', 'grad_rollout'].includes(method) ? method : `vit_${method}`;
+  return method.startsWith('vit_') ? method.replace('vit_', '') : method;
 }
 
 export function XaiLab() {
@@ -107,16 +130,26 @@ export function XaiLab() {
   const targets = Array.from(new Set(atts.filter((a) => a.model === mdl && a.method === meth).map((a) => a.target_class))).sort();
   const pred = mdl ? src.sample?.predictions[mdl]?.pred : undefined;
   const [target, setTarget] = useState<number | 'pred'>('pred');
-  const tgt = target === 'pred' ? (pred ?? targets[0]) : target;
-  const layers = Array.from(new Set(atts.filter((a) => a.model === mdl && a.method === meth && a.target_class === tgt).map((a) => a.layer)));
+  const tgt = target === 'pred' ? (pred != null && targets.includes(pred) ? pred : targets[0]) : target;
+  const layers = Array.from(new Set(atts.filter((a) => a.model === mdl && a.method === meth && a.target_class === tgt).map((a) => a.layer))).sort((a, b) => layerDepth(a) - layerDepth(b));
   const [layer, setLayer] = useState('');
   const lay = layers.includes(layer) ? layer : layers[layers.length - 1];
   const [opacity, setOpacity] = useState(0.55);
   const [cmap, setCmap] = useState<ColormapName>('inferno');
   const [threshold, setThreshold] = useState(0);
+  const [chipFilter, setChipFilter] = useState<'all' | 'correct' | 'wrong'>('all');
   const base = useMemo(() => resize(src.gray, 224, 224, 'bilinear'), [src.gray]);
-  const find = (m: ModelId, me: string, t: number, l?: string) => atts.find((a) => a.model === m && a.method === me && a.target_class === t && (!l || a.layer === l)) ?? atts.find((a) => a.model === m && a.method === me && a.target_class === t);
-  const sampleChips = manifest?.samples.filter((s) => s.attributions?.length) ?? [];
+  /** exact match on layer when given; otherwise the deepest available layer. Returns whether the layer matched. */
+  const find = (m: ModelId, me: string, t: number, l?: string): { e?: AttributionEntry; exact: boolean } => {
+    const cands = atts.filter((a) => a.model === m && a.method === me && a.target_class === t);
+    const exact = l ? cands.find((a) => a.layer === l) : undefined;
+    if (exact) return { e: exact, exact: true };
+    const deepest = [...cands].sort((a, b) => layerDepth(b.layer) - layerDepth(a.layer))[0];
+    return { e: deepest, exact: !l };
+  };
+  const allChips = manifest?.samples.filter((s) => s.attributions?.length) ?? [];
+  const chipOk = (s: SampleInfo) => { const p = s.predictions[mdl ?? 'densenet161']; return p ? p.pred === s.label : undefined; };
+  const sampleChips = allChips.filter((s) => chipFilter === 'all' || (chipFilter === 'correct' ? chipOk(s) === true : chipOk(s) === false));
 
   if (!atts.length) {
     return (
@@ -128,40 +161,52 @@ export function XaiLab() {
       </Figure>
     );
   }
-  const entry = mdl && meth && tgt != null ? find(mdl, meth, tgt, lay) : undefined;
+  const entry = mdl && meth && tgt != null ? find(mdl, meth, tgt, lay).e : undefined;
+  const ok = pred != null ? pred === src.sample!.label : undefined;
   return (
-    <Figure title="Explainability laboratory" prov="model" provDetail={entry ? `${entry.provenance.script} · ${entry.provenance.checkpoint_id ?? ''} · layer ${entry.layer}` : undefined}
-      caption={<>Heatmaps from the fine-tuned checkpoints for <b>{src.sample?.id}</b> (expert label {CLASS_SHORT[src.sample!.label]}). Each map is min–max scaled; the threshold hides values below a fraction of the maximum. Class-gradient methods answer “what increases <i>this</i> class score?”. Attention rollout is not class-specific. Compare a correct prediction with an incorrect one using the sample chips.</>}>
+    <Figure title="Explainability laboratory" prov="model" provDetail={entry ? `${entry.provenance.script} · ${entry.provenance.checkpoint_id ?? ''} · layer ${entry.layer}${entry.legacy_method ? ` · exported as '${entry.legacy_method}'` : ''}` : undefined}
+      caption={<>Heatmaps from the fine-tuned checkpoints for <b>{src.sample?.id}</b> (expert label {CLASS_SHORT[src.sample!.label]}{pred != null ? <>; {MODEL_META[mdl].name} predicts {CLASS_SHORT[pred]}, {ok ? 'correct' : <b>incorrect</b>}</> : ''}). Each map is min–max scaled for display; the raw range under each tile shows how strong the evidence actually was, because scaling makes a weak, diffuse map look as confident as a strong one. The threshold hides values below a fraction of the maximum. Class-gradient methods answer “what increases <i>this</i> class score?”; attention rollout is not class-specific. ViT layer labels count blocks from 1: “after block 8 of 12” is the token representation entering block 9. Use the chips to compare correct and incorrect predictions.</>}>
       <ImagePicker compact />
       <div className="row" style={{ gap: '0.3rem', marginBottom: '0.6rem' }}>
-        {sampleChips.slice(0, 16).map((s) => {
-          const p = s.predictions[mdl ?? 'densenet161'];
-          const ok = p ? p.pred === s.label : undefined;
-          return <button key={s.id} className="btn" style={{ padding: '0.1rem 0.45rem', borderColor: ok === false ? 'var(--p-missing)' : undefined }} aria-pressed={src.sample?.id === s.id} onClick={() => src.selectSample(s.id)}>
-            {CLASS_SHORT[s.label]}{ok === false ? ' ✗' : ok ? ' ✓' : ''}</button>;
+        <Seg label={`Samples (✓/✗ = ${MODEL_META[mdl].name} correct/wrong)`} value={chipFilter} onChange={setChipFilter} options={[
+          { value: 'all', label: `All (${allChips.length})` },
+          { value: 'correct', label: `Correct (${allChips.filter((s) => chipOk(s) === true).length})` },
+          { value: 'wrong', label: `Incorrect (${allChips.filter((s) => chipOk(s) === false).length})` },
+        ]} />
+      </div>
+      <div className="row" style={{ gap: '0.3rem', marginBottom: '0.6rem' }}>
+        {sampleChips.map((s) => {
+          const o = chipOk(s);
+          return <button key={s.id} className="btn" title={s.id} style={{ padding: '0.1rem 0.45rem', borderColor: o === false ? 'var(--p-missing)' : undefined }} aria-pressed={src.sample?.id === s.id} onClick={() => src.selectSample(s.id)}>
+            {CLASS_SHORT[s.label]}{o === false ? ' ✗' : o ? ' ✓' : ''}</button>;
         })}
       </div>
       <div className="split-wide">
         <div className="controls">
-          <Seg label="Compare" value={compare} onChange={setCompare} options={[{ value: 'methods', label: 'Methods for one model' }, { value: 'models', label: 'Models for one method' }]} />
+          <Seg label="Compare" value={compare} onChange={setCompare} options={[{ value: 'methods', label: 'Methods for one model' }, { value: 'models', label: 'Architectures for one method' }]} />
           <Seg label="Model" value={mdl} onChange={setModel} options={models.map((m) => ({ value: m, label: MODEL_META[m].name }))} />
-          <Seg label="Method" value={meth} onChange={setMethod} options={methods.map((m) => ({ value: m, label: METHOD_INFO[m]?.name ?? m }))} />
+          <Seg label="Method" value={meth} onChange={setMethod} options={methods.map((m) => ({ value: m, label: methodShort(m), title: methodLong(m) }))} />
           <Seg label="Target class" value={target} onChange={setTarget} options={[{ value: 'pred' as const, label: `Predicted (${pred != null ? CLASS_SHORT[pred] : '—'})` }, ...targets.map((t) => ({ value: t, label: CLASS_SHORT[t] }))]} />
-          {layers.length > 1 && <Seg label="Layer" value={lay} onChange={setLayer} options={layers.map((l) => ({ value: l, label: l.replace('features.', '') }))} />}
+          {layers.length > 0 && <Seg label="Layer (shallow → deep)" value={lay} onChange={setLayer} options={layers.map((l) => ({ value: l, label: layerShort(l, atts.find((a) => a.layer === l)?.layer_label), title: layerLabel(mdl, l) }))} />}
           <Slider label="Opacity" value={opacity} min={0} max={1} step={0.05} onChange={setOpacity} format={(v) => v.toFixed(2)} />
           <Slider label="Threshold" value={threshold} min={0} max={0.9} step={0.05} onChange={setThreshold} format={(v) => `${Math.round(v * 100)}% of max`} />
           <Seg label="Colour scale" value={cmap} onChange={setCmap} options={(['inferno', 'viridis', 'gray', 'jet'] as ColormapName[]).map((c) => ({ value: c, label: c }))} />
           <div style={{ height: 8, background: cssGradient(cmap), borderRadius: 2 }} aria-hidden />
           {cmap === 'jet' && <span className="small" style={{ color: 'var(--p-missing)' }}>Jet’s luminance is not monotone: mid-range values look brightest and create false boundaries.</span>}
-          {meth && <span className="small muted">{METHOD_INFO[meth]?.note}</span>}
+          {meth && <span className="small muted"><b>{methodLong(meth)}.</b> {METHOD_INFO[meth]?.note}</span>}
         </div>
         <div className="grid-2">
-          <HeatTile base={base} entry={entry} opacity={opacity} cmap={cmap} threshold={threshold} label={`${MODEL_META[mdl].name} · ${METHOD_INFO[meth]?.name ?? meth} · ${CLASS_SHORT[tgt]}`} />
+          <HeatTile base={base} entry={entry} opacity={opacity} cmap={cmap} threshold={threshold} label={`${MODEL_META[mdl].name} · ${methodShort(meth)} · ${CLASS_SHORT[tgt]}`} />
           {compare === 'methods'
-            ? methods.filter((m) => m !== meth).slice(0, 3).map((m) => <HeatTile key={m} base={base} entry={find(mdl, m, tgt)} opacity={opacity} cmap={cmap} threshold={threshold} label={METHOD_INFO[m]?.name ?? m} />)
+            ? methods.filter((m) => m !== meth).slice(0, 3).map((m) => {
+              const r = find(mdl, m, tgt, lay);
+              return <HeatTile key={m} base={base} entry={r.e} opacity={opacity} cmap={cmap} threshold={threshold} label={methodShort(m)} note={r.e && !r.exact ? 'selected layer not exported for this method' : undefined} />;
+            })
             : models.filter((m) => m !== mdl).map((m) => {
-              const alt = meth.startsWith('vit_') || ['attention_rollout', 'chefer'].includes(meth) ? (m === 'densenet161' ? meth.replace('vit_', '') : meth) : (m === 'densenet161' ? meth : `vit_${meth}`);
-              return <HeatTile key={m} base={base} entry={find(m, alt, tgt)} opacity={opacity} cmap={cmap} threshold={threshold} label={`${MODEL_META[m].name} · ${METHOD_INFO[alt]?.name ?? alt}`} />;
+              const alt = equivalentMethod(meth, m);
+              // same layer id where the architecture has it (ViT ↔ ViT); otherwise the deepest exported layer
+              const r = find(m, alt, tgt, lay);
+              return <HeatTile key={m} base={base} entry={r.e} opacity={opacity} cmap={cmap} threshold={threshold} label={`${MODEL_META[m].name} · ${methodShort(alt)}`} note={r.e && !r.exact ? 'deepest exported layer (no equivalent of the selected layer)' : undefined} />;
             })}
         </div>
       </div>
@@ -178,7 +223,7 @@ export function CompatibilityTable() {
         <thead><tr><th>Method</th><th>Signal</th>{ids.map((m) => <th key={m} style={{ color: MODEL_META[m].text }}>{MODEL_META[m].name}</th>)}</tr></thead>
         <tbody>
           {Object.entries(METHOD_INFO).map(([k, v]) => (
-            <tr key={k}><td>{v.name}</td><td className="small">{v.kind}</td>{ids.map((m) => <td key={m}>{v.models.includes(m) ? (v.status === 'reserved' ? 'reserved' : '✓') : '—'}</td>)}</tr>
+            <tr key={k}><td title={methodLong(k)}>{v.name}</td><td className="small">{v.kind}</td>{ids.map((m) => <td key={m}>{v.models.includes(m) ? (v.status === 'reserved' ? 'reserved' : '✓') : '—'}</td>)}</tr>
           ))}
         </tbody>
       </table>
@@ -196,8 +241,10 @@ export function MetaCamPanel() {
         Register an implementation in Python and re-export:
         <pre className="code" style={{ marginTop: '0.5rem' }}>{`from omari_us.explainability import register_method
 
-@register_method("metacampp", models=("densenet161", "vit_b16", "usf_mae"))
-def metacampp(model, x, target_class, layer=None, **kw) -> torch.Tensor:
+@register_method("metacampp",
+                 models=("densenet161", "vit_b16", "usf_mae"))
+def metacampp(model, x, target_class, layer=None,
+              **kw) -> torch.Tensor:
     """Return a non-negative (H', W') map for one image."""
     raise NotImplementedError  # supplied by the MetaCAM++ authors`}</pre>
       </Empty>

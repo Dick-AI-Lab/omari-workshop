@@ -22,6 +22,19 @@ medical images → data preparation → representation learning → training →
 | 6 | 105–115 | Model detective | Plausible ≠ faithful; test hypotheses by intervention | Hypothesis lock → perturbation evidence table (Δp, flips, map ρ), live overlay detector, shortcut toy, randomisation sanity check | Exported controlled experiments + live/toy | Occlusion question |
 | 7 | 115–120 | What would you trust? | Evidence needed before deployment | Opening image again, deployment checklist, takeaways, notebooks | — | Questions |
 
+## What the real results let each chapter say (added 2026-11-14)
+
+The verified numbers are in `docs/POST_TRAINING_AUDIT_2026-11-14.md`. The data shown comes from the finalized bundle (`scripts/finalize_website_bundle.py`, schema 1.1).
+
+| Chapter | Supported message | Do not say |
+|---|---|---|
+| 1 | Three models agree on most images; disagreements exist and are instructive | That any model "sees" the anatomy |
+| 2 | The split is patient-disjoint (overlap 0). A loose hash detector still finds 2,685 look-alike train/val↔test pairs (different patients), with no visible accuracy inflation. Voluson S10 is almost absent from training (11 images) but makes up 20% of test | "There are no near-duplicates" |
+| 3C | USF-MAE (500-epoch checkpoint) reconstructs masked ultrasound. Its pretraining corpus included FETAL_PLANES_DB images without labels: transductive exposure, not label leakage | That reconstructions show what the classifier uses |
+| 4 | Full labels: macro-F1 0.9425 / 0.9410 / 0.9416 ± 0.0023, **statistically indistinguishable**. Low labels (macro-F1): USF-MAE ahead of DenseNet clearly only at 5% (0.888 ± 0.008 vs 0.808 ± 0.023). ViT low-label was **not run** and is shown as such. All models are under-confident; temperature scaling fixes ECE | Any full-label ranking; "foundation models are better" |
+| 5 | Methods disagree; ViT layer names read "after block N of 12"; gradient-weighted rollout is a simplified Chefer-inspired variant | That heatmaps are ground truth |
+| 6 | Faithfulness (n = 30): attention rollout ≈ random; USF-MAE token Grad-CAM worse than random | Significance claims |
+
 ## Where each provenance type appears
 
 | Badge | Meaning | Examples |
@@ -30,4 +43,4 @@ medical images → data preparation → representation learning → training →
 | Model output | Precomputed by real checkpoints through the export pipeline | Predictions, feature maps, attention, attributions, reconstructions, evaluation, curves |
 | Live inference | Local Python server running the checkpoints | Preprocessing lab at unexported settings |
 | Illustrative | Toy or hypothetical | Toy attention, toy CAM, shortcut and sanity-check toys, hypothetical classifier, synthetic calibration, leakage 1-NN |
-| Awaiting artifact | Real output required but not exported | Every model-output figure before training |
+| Awaiting artifact | Real output required but not exported (or a run that was never done, shown as "not run") | Every model-output figure before the bundle is installed; ViT-B/16 label efficiency below 100% |

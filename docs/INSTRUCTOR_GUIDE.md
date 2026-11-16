@@ -7,10 +7,11 @@ OMARI Seminar Series · 120 minutes including a 10-minute break · mixed audienc
 
 | When | Task | Check |
 |---|---|---|
-| 1 week before | Train the models and export the bundle (see `docs/TRAINING_PLAN.md`) | `python scripts/check_provenance.py website/public/experiments` passes |
-| 1 week before | Choose the opening image: a test image all three models classify correctly with different confidence, or one where they disagree. Set `samples.opening` in `configs/export.yaml` and re-export | Chapter 1 shows it |
-| 2 days before | `cd website && npm run build`. Open `dist/` on the presentation laptop (works offline) | No "Awaiting artifact" badges in Chapters 1, 3, 4, 5, 6 |
-| 2 days before | Optional: start the live-inference server (`python -m omari_us.serve --config configs/export.yaml`) and confirm the closing chapter reports "connected" | Live inference available |
+| Done (2026-11-12) | Models trained in Colab (38 runs). Outputs are in `content/omari_artifacts/omari_artifacts/` | see `docs/PROVENANCE.md` |
+| 1 week before | Build the corrected bundle: `python scripts/finalize_website_bundle.py --artifacts content/omari_artifacts/omari_artifacts --out website/public/experiments` (add `--reconstruct --device cuda` for 500ep reconstructions) | `python scripts/check_provenance.py website/public/experiments` passes |
+| 1 week before | Check the opening image. The Colab bundle auto-selected 24 test samples (`samples.opening` was `null`, and the first sample is `Patient00647_Plane5_1_of_1`). If you want a deliberate choice (all three correct with different confidence, or a disagreement), a re-export is needed | Chapter 1 shows it |
+| 2 days before | `cd website && npm ci && npm run build`. Open `dist/` on the presentation laptop (works offline) | No "Awaiting artifact" badges in Chapters 1, 3, 4, 5, 6, except ViT label efficiency below 100%, which is honestly marked "not run" |
+| 2 days before | Optional: start the live-inference server (`pip install -e "python[serve]"`, then `python -m omari_us.serve --config configs/export.yaml` with checkpoint paths pointing at existing `best.pt` files) and confirm the closing chapter reports "connected" | Live inference available |
 | Day of | Share the participant URL (static host, or the laptop's LAN address via `npm run preview -- --host`) | Participants can load it on laptops and tablets |
 | Day of | Projector: 1920×1080 or larger, browser zoom 110–125% | Body text readable from the back row |
 
@@ -19,6 +20,20 @@ OMARI Seminar Series · 120 minutes including a 10-minute break · mixed audienc
 ### Presenter controls
 
 `P` toggles presenter mode (larger type, HUD with timer and cue). `←`/`→` step between figures and headings. `[`/`]` jump chapters. `F` toggles fullscreen and `T` starts or pauses the clock. The top bar is the session timeline: segment width = minutes, and the dark marker is elapsed time once the clock runs. Open `?mode=present` to start in presenter mode.
+
+## Real results: talking points (read before presenting)
+
+All numbers are verified from the run artifacts (`docs/POST_TRAINING_AUDIT_2026-11-14.md`). Use this wording, or something equally careful.
+
+- **Full labels: no winner.** Test macro-F1 is DenseNet-161 0.9425, ViT-B/16 0.9410 and USF-MAE 0.9416 ± 0.0023 (USF-MAE has 3 seeds, the others 1). Test accuracy is about 0.947 for all three. The CIs overlap and Holm-adjusted McNemar p = 1. Say: *"On this test set, with this protocol, we cannot tell these three apart."* Do **not** present a ranking.
+- **Low labels: USF-MAE helps, with a caveat.** At 5% of training patients (41 patients), USF-MAE reaches macro-F1 **0.888 ± 0.008** vs DenseNet-161 **0.808 ± 0.023** (3 seeds each; the seed ranges do not overlap). The gap is noisy at 1%, small at 10% and gone from 25% up. Always add two things:
+  - USF-MAE's pretraining corpus contained FETAL_PLANES_DB images, without labels. That is transductive exposure, not label leakage, but it may help most exactly in this low-label regime.
+  - **ViT-B/16 was not run at low labels.** So we cannot say whether the gain comes from ultrasound MAE pretraining or from the transformer architecture.
+- **Use macro-F1, not accuracy, for label efficiency.** "Other" is 34% of the images.
+- **Frozen probe.** Macro-F1 is DenseNet 0.766, ViT 0.804 and USF-MAE 0.804. Mention that BN statistics adapted (not a pure linear probe), so this is not a clean representation-quality ranking.
+- **Calibration.** All models are *under*-confident (ECE ≈ 0.13–0.14). Temperature scaling fitted on validation (T ≈ 0.6) brings ECE to about 0.01. The likely cause is label smoothing plus class-weighted loss.
+- **Scanner shift.** Voluson S10 has 1,071 test images but only 11 training images. USF-MAE's S10 accuracy is 0.937 vs 0.922–0.923 for the others: single seed, and confounded with the pretraining overlap.
+- **Explainability faithfulness (n = 30, no significance test).** For DenseNet, CAM and Grad-CAM beat the random map. For both ViTs, gradient-weighted rollout scores best. Attention rollout scores about the same as random, and USF-MAE token Grad-CAM scores worse than random. Use this to make the point that "a heatmap is a hypothesis".
 
 ## Running order
 
@@ -62,7 +77,7 @@ OMARI Seminar Series · 120 minutes including a 10-minute break · mixed audienc
 | 0:43 | Read the paragraph "Attention maps are seductive…" | Plant the distinction you will need in Chapter 5 |
 | 0:45 | **3C Masking explorer**: ratio 25% → 75% → 90% | The encoder sees 49 of 196 patches at 75%. Compute drops to ~25%. Show the authentic USF-MAE reconstruction if exported; contrast with the naive fill |
 | 0:47 | Pretraining vs fine-tuning schematic | Decoder discarded; new 6-way head. Frozen = linear probe |
-| 0:48 | **Overlap callout**: read aloud | FETAL_PLANES_DB was part of OpenUS-46 (images, not labels). State it plainly |
+| 0:48 | **Overlap callout**: read aloud | FETAL_PLANES_DB was part of OpenUS-46 (images, not labels). That is transductive exposure, not label leakage. Our USF-MAE is the 500-epoch checkpoint, which saw that corpus longest. State it plainly |
 | 0:49 | Ask the multiple-choice question; reveal | Only "it depends" is defensible before measuring |
 
 ### 0:50–1:10 · Chapter 4: Training, evaluation and generalisation
@@ -70,14 +85,14 @@ OMARI Seminar Series · 120 minutes including a 10-minute break · mixed audienc
 | Min | Do | Say / ask |
 |---|---|---|
 | 0:50 | Text on frozen vs fine-tuning; open *Mathematical details* (weighted CE, focal, layer decay) | Same splits, loss and selection rule; each model keeps its own established recipe |
-| 0:53 | **Test-set performance**: accuracy vs macro-F1 vs balanced accuracy; CIs | Patient-cluster bootstrap. Note how wide the intervals are |
+| 0:53 | **Test-set performance**: accuracy vs macro-F1 vs balanced accuracy; CIs | Patient-cluster bootstrap. All three are around 0.94 macro-F1 with overlapping CIs: "we cannot tell them apart". DenseNet and ViT have one seed; USF-MAE shows the seed spread (±0.002) |
 | 0:56 | Click the abdomen→thorax cell | Look at the images together: are these model errors or label ambiguity? |
 | 0:58 | Per-class metric toggle F1 → precision → recall | Which class is hardest for each model? |
 | 0:59 | **ROC / threshold**: positive class = Brain, slide the threshold | A threshold only makes sense for a one-vs-rest question |
 | 1:01 | **Prevalence simulator**: dataset mix → cervical-length clinic | Recall unchanged; precision moves. This is why deployment setting matters |
 | 1:04 | **Calibration**: reliability diagram; temperature what-if | T is fitted on validation in notebook 05; here it is for intuition. Accuracy is unchanged by T |
-| 1:06 | **Label efficiency** curves | Where (if anywhere) does domain pretraining help most? Check seeds and bands before reading differences |
-| 1:08 | **By machine** table | Subgroups are confounded; leave-one-machine-out is the stronger test |
+| 1:06 | **Label efficiency** curves (macro-F1) | USF-MAE is clearly ahead only at 5% (0.888 vs 0.808). ViT was not run below 100%, so this does not isolate pretraining from architecture. Repeat the overlap caveat. Check seeds and bands before reading differences |
+| 1:08 | **By machine** table | Voluson S10: 1,071 test images, only 11 in training. Subgroups are confounded; leave-one-machine-out is the stronger test |
 | 1:09 | Final multiple-choice question; reveal | Repeat both caveats: recipes differ; pretraining overlap |
 
 ### 1:10–1:20 · Break
@@ -94,7 +109,7 @@ Leave the page on the Break section. Its three prompts point participants to lab
 | 1:26 | **Toy CAM**: "Anatomy-like weights"; switch CAM → Grad-CAM → Grad-CAM++ | You know the truth here because you set the weights. Point to the deletion curve vs random |
 | 1:29 | Drag the "overlay" weight up | The map moves to the burned-in text: the explanation can reveal a shortcut **when the model uses one** |
 | 1:30 | Open *Limitations*: resolution (7×7), ReLU, normalisation hiding magnitude | — |
-| 1:32 | **Explainability lab** (real maps): one correct and one incorrect sample; compare methods for DenseNet | Note how much methods differ on the same model and image |
+| 1:32 | **Explainability lab** (real maps): one correct and one incorrect sample; compare methods for DenseNet | Note how much methods differ on the same model and image. ViT layers read "after block N of 12" |
 | 1:36 | Switch to "Models for one method" | Coarse 7×7 vs 14×14 maps; different models may "look" at different regions with the same prediction |
 | 1:38 | Change target class to a wrong class | Class-specific maps change; attention rollout does not |
 | 1:40 | Colour scale → jet | Why perceptually uniform maps matter |
@@ -130,7 +145,9 @@ Leave the page on the Break section. Its three prompts point participants to lab
 
 ## Questions to expect, and honest answers
 
-- **"Which model is best?"** Show the CIs and the label-efficiency curve. If differences overlap, say so. Mention the pretraining overlap for USF-MAE.
+- **"Which model is best?"** At full labels: none. The three are statistically indistinguishable (macro-F1 0.941–0.943, Holm-adjusted p = 1). With few labels (5%), USF-MAE is ahead of DenseNet. But its pretraining saw these images without labels, and ViT was not tested at low labels, so we cannot attribute the gain to the pretraining method alone.
+- **"Did USF-MAE cheat?"** No labels leaked: plane labels were never part of pretraining. But the encoder had seen the test images during self-supervised pretraining (transductive exposure). That can help, and a clean test needs a checkpoint pretrained without this dataset, or an external test set.
+- **"Aren't there duplicates between train and test?"** A loose hash detector finds 2,685 similar-looking train/val↔test pairs, all from different patients and a third with different labels. Accuracy on test images with a same-label look-alike was not higher than on the rest. The split itself is patient-disjoint.
 - **"Is the heatmap what the model sees?"** No. It shows where a particular perturbation-free gradient signal is large at 7×7 or 14×14 resolution. Use the deletion curve and sanity check as evidence.
 - **"Could this be deployed?"** Not on this evidence: single public dataset, two hospitals, no prospective or external validation (see the checklist).
 - **"Why not train on everything at full resolution?"** Pretrained weights expect 224². Higher resolution is possible (interpolated positional embeddings for ViTs) but changes compute and comparability.

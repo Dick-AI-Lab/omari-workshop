@@ -1,0 +1,435 @@
+{
+  "bundle": "website\\public\\experiments",
+  "bundle_finalized_at": "2026-11-14T11:17:45+00:00",
+  "opening_sample": "Patient01712_Plane2_1_of_2",
+  "class_examples": {
+    "Fetal abdomen": "Patient01620_Plane2_2_of_2",
+    "Fetal brain": "Patient01372_Plane3_1_of_8",
+    "Fetal femur": "Patient00647_Plane5_1_of_1",
+    "Fetal thorax": "Patient01693_Plane6_1_of_2",
+    "Maternal cervix": "Patient01230_Plane4_2_of_4",
+    "Other": "Patient01509_Plane1_5_of_13"
+  },
+  "feature_maps": [
+    [
+      "features.denseblock1",
+      [
+        384,
+        56,
+        56
+      ],
+      24
+    ],
+    [
+      "features.denseblock2",
+      [
+        768,
+        28,
+        28
+      ],
+      163
+    ],
+    [
+      "features.denseblock3",
+      [
+        2112,
+        14,
+        14
+      ],
+      3
+    ],
+    [
+      "features.denseblock4",
+      [
+        2208,
+        7,
+        7
+      ],
+      1256
+    ]
+  ],
+  "attention": {
+    "vit_b16_block1": {
+      "top5_patches": [
+        42,
+        69,
+        55,
+        28,
+        83
+      ],
+      "max_share": 0.004675583448261023
+    },
+    "vit_b16_block6": {
+      "top5_patches": [
+        75,
+        25,
+        161,
+        176,
+        146
+      ],
+      "max_share": 0.06351100653409958
+    },
+    "vit_b16_block12": {
+      "top5_patches": [
+        75,
+        25,
+        31,
+        161,
+        54
+      ],
+      "max_share": 0.12487149983644485
+    },
+    "usf_mae_block1": {
+      "top5_patches": [
+        11,
+        98,
+        84,
+        83,
+        27
+      ],
+      "max_share": 0.08282650262117386
+    },
+    "usf_mae_block6": {
+      "top5_patches": [
+        13,
+        182,
+        0,
+        154,
+        140
+      ],
+      "max_share": 0.008324416354298592
+    },
+    "usf_mae_block12": {
+      "top5_patches": [
+        91,
+        105,
+        92,
+        106,
+        90
+      ],
+      "max_share": 0.10756006836891174
+    }
+  },
+  "reconstructions": [
+    {
+      "mask_ratio": 0.25,
+      "n_masked": 49,
+      "loss_masked_mse": 0.11589861661195755,
+      "checkpoint": "usf_mae_500ep.pth",
+      "sha256": "c659a06170b0f6967ae7f6d066681b8dea2c122a5f325bb8a82df11ffb3a2533"
+    },
+    {
+      "mask_ratio": 0.5,
+      "n_masked": 98,
+      "loss_masked_mse": 0.1618826538324356,
+      "checkpoint": "usf_mae_500ep.pth",
+      "sha256": "c659a06170b0f6967ae7f6d066681b8dea2c122a5f325bb8a82df11ffb3a2533"
+    },
+    {
+      "mask_ratio": 0.75,
+      "n_masked": 147,
+      "loss_masked_mse": 0.24666480720043182,
+      "checkpoint": "usf_mae_500ep.pth",
+      "sha256": "c659a06170b0f6967ae7f6d066681b8dea2c122a5f325bb8a82df11ffb3a2533"
+    },
+    {
+      "mask_ratio": 0.9,
+      "n_masked": 177,
+      "loss_masked_mse": 0.49733051657676697,
+      "checkpoint": "usf_mae_500ep.pth",
+      "sha256": "c659a06170b0f6967ae7f6d066681b8dea2c122a5f325bb8a82df11ffb3a2533"
+    }
+  ],
+  "xai": [
+    {
+      "file": "xai_densenet_gradcam",
+      "model": "densenet161",
+      "method": "gradcam",
+      "layer": "act",
+      "label": "Grad-CAM \u00b7 final features (7\u00d77)",
+      "target_class": 0,
+      "source_png": "samples/Patient01712_Plane2_1_of_2/attributions/densenet161_gradcam_act_c0.png",
+      "checkpoint_sha256": "456847049ab204aac38fd4f7a189965d3069a534577eee056fb9a7bdfb937ff2"
+    },
+    {
+      "file": "xai_densenet_gradcampp",
+      "model": "densenet161",
+      "method": "gradcampp",
+      "layer": "act",
+      "label": "Grad-CAM++ \u00b7 final features (7\u00d77)",
+      "target_class": 0,
+      "source_png": "samples/Patient01712_Plane2_1_of_2/attributions/densenet161_gradcampp_act_c0.png",
+      "checkpoint_sha256": "456847049ab204aac38fd4f7a189965d3069a534577eee056fb9a7bdfb937ff2"
+    },
+    {
+      "file": "xai_densenet_cam",
+      "model": "densenet161",
+      "method": "cam",
+      "layer": "act",
+      "label": "CAM \u00b7 final features (7\u00d77)",
+      "target_class": 0,
+      "source_png": "samples/Patient01712_Plane2_1_of_2/attributions/densenet161_cam_act_c0.png",
+      "checkpoint_sha256": "456847049ab204aac38fd4f7a189965d3069a534577eee056fb9a7bdfb937ff2"
+    },
+    {
+      "file": "xai_vit_gradrollout",
+      "model": "vit_b16",
+      "method": "grad_rollout",
+      "layer": "final",
+      "label": "Gradient-weighted attention rollout",
+      "target_class": 0,
+      "source_png": "samples/Patient01712_Plane2_1_of_2/attributions/vit_b16_chefer_final_c0.png",
+      "checkpoint_sha256": "49fe4168a8922632d88aa36fa1e85c55dc14db32d4b9159549c99fadbe684d8c"
+    },
+    {
+      "file": "xai_vit_tokengradcam_b11",
+      "model": "vit_b16",
+      "method": "vit_gradcam",
+      "layer": "block11",
+      "label": "Token Grad-CAM \u00b7 after block 11 of 12",
+      "target_class": 0,
+      "source_png": "samples/Patient01712_Plane2_1_of_2/attributions/vit_b16_vit_gradcam_block11_c0.png",
+      "checkpoint_sha256": "49fe4168a8922632d88aa36fa1e85c55dc14db32d4b9159549c99fadbe684d8c"
+    },
+    {
+      "file": "xai_usf_gradrollout",
+      "model": "usf_mae",
+      "method": "grad_rollout",
+      "layer": "final",
+      "label": "Gradient-weighted attention rollout",
+      "target_class": 0,
+      "source_png": "samples/Patient01712_Plane2_1_of_2/attributions/usf_mae_chefer_final_c0.png",
+      "checkpoint_sha256": "65680650b75f30ff7f38d88afa27c820de87a20ebc3e7c42d761a9b5df9c29d1"
+    },
+    {
+      "file": "xai_usf_rollout",
+      "model": "usf_mae",
+      "method": "attention_rollout",
+      "layer": "final",
+      "label": "Attention rollout",
+      "target_class": 0,
+      "source_png": "samples/Patient01712_Plane2_1_of_2/attributions/usf_mae_attention_rollout_final_c0.png",
+      "checkpoint_sha256": "65680650b75f30ff7f38d88afa27c820de87a20ebc3e7c42d761a9b5df9c29d1"
+    },
+    {
+      "file": "xai_usf_tokengradcam_b11",
+      "model": "usf_mae",
+      "method": "vit_gradcam",
+      "layer": "block11",
+      "label": "Token Grad-CAM \u00b7 after block 11 of 12",
+      "target_class": 0,
+      "source_png": "samples/Patient01712_Plane2_1_of_2/attributions/usf_mae_vit_gradcam_block11_c0.png",
+      "checkpoint_sha256": "65680650b75f30ff7f38d88afa27c820de87a20ebc3e7c42d761a9b5df9c29d1"
+    },
+    {
+      "file": "xai_usf_tokengradcampp_b11",
+      "model": "usf_mae",
+      "method": "vit_gradcampp",
+      "layer": "block11",
+      "label": "Token Grad-CAM++ \u00b7 after block 11 of 12",
+      "target_class": 0,
+      "source_png": "samples/Patient01712_Plane2_1_of_2/attributions/usf_mae_vit_gradcampp_block11_c0.png",
+      "checkpoint_sha256": "65680650b75f30ff7f38d88afa27c820de87a20ebc3e7c42d761a9b5df9c29d1"
+    }
+  ],
+  "perturbations": {
+    "femur": {
+      "id": "Patient00647_Plane5_1_of_1",
+      "label": 2,
+      "perturbation": "top-10% Grad-CAM (DenseNet) region blurred",
+      "before": {
+        "densenet161": {
+          "pred": 2,
+          "p_true": 0.97065
+        },
+        "vit_b16": {
+          "pred": 2,
+          "p_true": 0.956241
+        },
+        "usf_mae": {
+          "pred": 2,
+          "p_true": 0.946229
+        }
+      },
+      "after": {
+        "densenet161": {
+          "pred": 5,
+          "p_true": 0.154674
+        },
+        "vit_b16": {
+          "pred": 5,
+          "p_true": 0.086552
+        },
+        "usf_mae": {
+          "pred": 5,
+          "p_true": 0.189994
+        }
+      },
+      "baseline_source": "predictions_display_png"
+    },
+    "abdomen": {
+      "id": "Patient01712_Plane2_1_of_2",
+      "label": 0,
+      "perturbation": "top-10% Grad-CAM (DenseNet) region blurred",
+      "before": {
+        "densenet161": {
+          "pred": 0,
+          "p_true": 0.979237
+        },
+        "vit_b16": {
+          "pred": 0,
+          "p_true": 0.970976
+        },
+        "usf_mae": {
+          "pred": 0,
+          "p_true": 0.962695
+        }
+      },
+      "after": {
+        "densenet161": {
+          "pred": 0,
+          "p_true": 0.923493
+        },
+        "vit_b16": {
+          "pred": 5,
+          "p_true": 0.172697
+        },
+        "usf_mae": {
+          "pred": 0,
+          "p_true": 0.934938
+        }
+      },
+      "baseline_source": "predictions_display_png"
+    }
+  },
+  "label_efficiency": {
+    "densenet161/macro_f1": [
+      [
+        1.0,
+        0.5631299852303312,
+        0.07328170050482395
+      ],
+      [
+        5.0,
+        0.8078845713374317,
+        0.022533398077383228
+      ],
+      [
+        10.0,
+        0.8817685199687771,
+        0.007137720670082475
+      ],
+      [
+        25.0,
+        0.9226045884398597,
+        0.0018646646904285243
+      ],
+      [
+        50.0,
+        0.9325105803642065,
+        0.0071701524925694635
+      ],
+      [
+        100.0,
+        0.9425145665946869,
+        null
+      ]
+    ],
+    "usf_mae/macro_f1": [
+      [
+        1.0,
+        0.6367510464174976,
+        0.03135289002906167
+      ],
+      [
+        5.0,
+        0.8881371056753155,
+        0.007950133252618381
+      ],
+      [
+        10.0,
+        0.9004820544042205,
+        0.01519174419548021
+      ],
+      [
+        25.0,
+        0.9298110008648482,
+        0.005362906127961123
+      ],
+      [
+        50.0,
+        0.935166454929281,
+        0.004843825018202168
+      ],
+      [
+        100.0,
+        0.9415848778485009,
+        0.002326776535950158
+      ]
+    ],
+    "densenet161/accuracy": [
+      [
+        1.0,
+        0.5761082653512932,
+        0.0896984484375489
+      ],
+      [
+        5.0,
+        0.8197053057610827,
+        0.02907713237228813
+      ],
+      [
+        10.0,
+        0.8916081704926327,
+        0.008419118062678872
+      ],
+      [
+        25.0,
+        0.9289192436602796,
+        0.002010764952328416
+      ],
+      [
+        50.0,
+        0.9382153923986594,
+        0.006885806659743838
+      ],
+      [
+        100.0,
+        0.9474483020299753,
+        null
+      ]
+    ],
+    "usf_mae/accuracy": [
+      [
+        1.0,
+        0.6937962435970405,
+        0.052621169408429
+      ],
+      [
+        5.0,
+        0.896414342629482,
+        0.007206761492400911
+      ],
+      [
+        10.0,
+        0.9084297729716057,
+        0.014410193073013128
+      ],
+      [
+        25.0,
+        0.935685828116107,
+        0.0037321790121240457
+      ],
+      [
+        50.0,
+        0.9406817175741478,
+        0.004498874701026319
+      ],
+      [
+        100.0,
+        0.9471321064946564,
+        0.002115440293894617
+      ]
+    ]
+  }
+}

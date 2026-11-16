@@ -1,0 +1,17 @@
+,,deletion_auc,deletion_auc,insertion_auc,insertion_auc
+,,mean,std,mean,std
+model,method,,,,
+densenet161,cam,0.335,0.285,0.734,0.087
+densenet161,gradcam,0.337,0.283,0.736,0.085
+densenet161,gradcampp,0.369,0.279,0.698,0.179
+densenet161,random,0.383,0.279,0.371,0.285
+usf_mae,attention_rollout,0.483,0.207,0.521,0.183
+usf_mae,chefer,0.332,0.235,0.663,0.208
+usf_mae,random,0.494,0.202,0.508,0.177
+usf_mae,vit_gradcam,0.561,0.212,0.49,0.228
+usf_mae,vit_gradcampp,0.417,0.213,0.576,0.217
+vit_b16,attention_rollout,0.503,0.193,0.478,0.22
+vit_b16,chefer,0.35,0.288,0.668,0.166
+vit_b16,random,0.458,0.226,0.447,0.243
+vit_b16,vit_gradcam,0.405,0.255,0.62,0.151
+vit_b16,vit_gradcampp,0.486,0.227,0.519,0.238

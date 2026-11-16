@@ -1,9 +1,15 @@
-"""Write the website artifact bundle (schema v1; see docs/ARTIFACT_SCHEMA.md and website/src/data/types.ts).
+"""Write the website artifact bundle (schema 1.1; see docs/ARTIFACT_SCHEMA.md and website/src/data/types.ts).
 
 Everything written here comes from real inference with the checkpoints named in the config. Each item carries
 provenance (script, checkpoint id + sha256, parameters, time, git commit). Nothing is interpolated or invented:
 if a checkpoint or input is missing, the corresponding section is simply omitted and the website shows its
 empty state.
+
+Schema 1.1 (backward compatible with 1.0): sample predictions come from the headline runs' test_predictions.npz
+(the evaluation that produced the metrics, original-resolution images); label efficiency is a fractions x seeds grid of
+macro-F1 and accuracy with nulls for runs not performed; dataset_stats keeps near-duplicates and a separate val split;
+attributions carry method_label/layer_label; the gradient-weighted rollout method id is `grad_rollout` (was `chefer`).
+To correct an already-exported 1.0 bundle without re-running inference use scripts/finalize_website_bundle.py.
 
 Usage:
     python scripts/export_website_artifacts.py --config configs/export.yaml
@@ -31,10 +37,22 @@ from ..datasets.fetal_planes import dataset_stats
 from ..evaluation import metrics as M
 from ..models import load_finetuned
 from ..utils import CLASSES, MODEL_IDS, NUM_CLASSES, get_device, git_commit, now_iso, provenance, sha256_file, write_json
+from . import finalize as FZ
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 SCRIPT = "omari_us.export.website_export"
 DISPLAY = {"densenet161": "DenseNet-161", "vit_b16": "ViT-B/16", "usf_mae": "USF-MAE"}
+LE_NOTES = [
+    "Values are test-set (n = 5,271 images, 896 patients) macro-F1 and accuracy read from each run's summary.json; null = run not performed.",
+    "Label fractions sample training PATIENTS (stratified by each patient's majority class, all their images kept); the same seed gives "
+    "the same subset for every model (see the n_train_images grid). The exact subsets were not saved.",
+    "Model selection used the full patient-disjoint validation set (87 patients) at every label fraction.",
+    "USF-MAE's self-supervised pretraining corpus included unlabelled FETAL_PLANES_DB images (see models[].notes); this may favour it at low label fractions.",
+]
+SAMPLE_PREDICTIONS_SOURCE = ("samples[].predictions are taken from the headline runs' test_predictions.npz (runs/<model>_finetune_lf1_s0), i.e. the "
+                             "same evaluation that produced evaluation.json (original-resolution images, each run's own preprocessing), not "
+                             "recomputed on the downscaled PNGs. samples[].predictions_display_png (when present) were recomputed on the "
+                             "exported <= 640 px PNG, the same pipeline as the perturbation panel, and are the right baseline for perturbation deltas.")
 
 
 @dataclass
@@ -126,8 +144,24 @@ class Exporter:
             ft = f"{c.get('regime', '?')}; {c.get('epochs', '?')} epochs max; lr {c.get('lr')}; loss {c.get('loss')}; label fraction {c.get('label_fraction')}; seed {c.get('seed')}; best epoch {lm.meta.get('epoch')}"
             out.append({"id": mid, "display_name": DISPLAY[mid], "checkpoint_id": lm.ckpt_id, "checkpoint_sha256": lm.sha256,
                         "initialization": lm.meta.get("init_source", "unknown"), "finetuning": ft, "params": int(n_params),
-                        "input": lm.spec.to_dict(), "notes": (self.cfg.get("models") or {}).get(mid, {}).get("notes")})
+                        "input": lm.spec.to_dict(), "notes": (self.cfg.get("models") or {}).get(mid, {}).get("notes") or ""})
+            pre = self._pretraining(mid)
+            if pre:
+                out[-1]["pretraining"] = pre
         return out
+
+    def _pretraining(self, mid: str) -> Optional[Dict]:
+        mc = (self.cfg.get("models") or {}).get(mid) or {}
+        pre = dict(mc.get("pretraining") or {})
+        if not pre:
+            return None
+        ck = mc.get("pretrain_checkpoint")
+        if mid == "usf_mae" and ck and os.path.exists(ck):  # hash the file actually present, and refuse a silent mismatch
+            sha = sha256_file(ck)
+            if pre.get("sha256") and pre["sha256"] != sha:
+                raise ValueError(f"{ck}: sha256 {sha} differs from configured pretraining sha256 {pre['sha256']}")
+            pre["sha256"], pre["checkpoint"] = sha, os.path.basename(ck)
+        return pre
 
     # -- sample selection uses saved test predictions when available (no extra inference)
     def select_samples(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -172,6 +206,17 @@ class Exporter:
         self.say(f"[samples] {len(sel)} selected")
         return sel
 
+    def _sample_prediction_table(self) -> Dict[str, Dict]:
+        if self.cfg.get("sample_predictions", "npz") != "npz":
+            return {}
+        if not hasattr(self, "_npz_table"):
+            self._npz_table = {}
+            for mid, run in (self.cfg.get("evaluation", {}).get("runs") or {}).items():
+                f = os.path.join(run, "test_predictions.npz")
+                if os.path.exists(f):
+                    self._npz_table[mid] = FZ.load_predictions(f)
+        return self._npz_table
+
     def _load_run_predictions(self) -> Dict[str, Dict]:
         out = {}
         for mid, run in (self.cfg.get("evaluation", {}).get("runs") or {}).items():
@@ -193,8 +238,17 @@ class Exporter:
         for k in ("Brain_plane", "US_Machine", "Operator"):
             if k in r and isinstance(r[k], str):
                 s[{"Brain_plane": "brain_plane", "US_Machine": "machine", "Operator": "operator"}[k]] = r[k]
+        npz = self._sample_prediction_table()
+        display = {}
         for mid, lm in self.models.items():
-            s["predictions"][mid] = predict_one(lm, gray, self.device)
+            display[mid] = predict_one(lm, gray, self.device)
+            if mid in npz and sid in npz[mid]:
+                p = npz[mid][sid]
+                s["predictions"][mid] = {"probs": p["probs"], "pred": p["pred"]}
+            else:
+                s["predictions"][mid] = display[mid]
+        # predictions on the exported (<= max_side px) PNG: same pipeline as the perturbation panel, so use these as its baseline
+        s["predictions_display_png"] = display
         sec = self.cfg
         if sec.get("features", {}).get("enabled", True) and "densenet161" in self.models:
             s["features"] = {"densenet161": self._features(self.models["densenet161"], gray, sdir)}
@@ -279,7 +333,9 @@ class Exporter:
                             continue
                         name = f"{mid}_{meth}_{layer or 'final'}_c{t}.png"
                         info = save_map_png(m, sdir / "attributions" / name)
-                        out.append({"model": mid, "method": meth, "layer": layer or "final", "target_class": int(t), "png": f"samples/{sdir.name}/attributions/{name}",
+                        out.append({"model": mid, "method": meth, "method_label": X.method_label(meth), "layer": layer or "final",
+                                    "layer_label": X.layer_label(mid, layer or "final", meth), "target_class": int(t),
+                                    "png": f"samples/{sdir.name}/attributions/{name}",
                                     **info, "provenance": lm.prov(method=meth, layer=layer or "final", target_class=int(t))})
         return out
 
@@ -341,14 +397,18 @@ class Exporter:
             tag = f"{kind}_{str(param).replace('.', 'p').replace('-', 'm')}"
             save_gray_png(img, sdir / "perturbations" / f"{tag}.png")
             e = {"type": kind, "param": float(param), "label": label, "image_png": f"samples/{sdir.name}/perturbations/{tag}.png", "predictions": {}, "attributions": {},
-                 "provenance": provenance(SCRIPT, params={"type": kind, "param": float(param), "seed": int(pc.get("seed", 0)), "semantics": "omari_us.datasets.perturbations"})}
+                 "provenance": provenance(SCRIPT, params={"type": kind, "param": float(param), "seed": int(pc.get("seed", 0)), "semantics": "omari_us.datasets.perturbations",
+                                                          "attribution_target": "true label", "input": f"exported sample PNG (<= {self.max_side} px)",
+                                                          "checkpoints": {m: {"checkpoint_id": l.ckpt_id, "checkpoint_sha256": l.sha256} for m, l in self.models.items()}})}
             for mid, lm in self.models.items():
                 e["predictions"][mid] = predict_one(lm, img, self.device)
                 meth = "gradcam" if mid == "densenet161" else "vit_gradcam"
                 mm = X.explain(meth, mid, lm.model, to_input(lm, img, self.device), s["label"])
                 name = f"{tag}_{mid}_{meth}.png"
                 save_map_png(mm, sdir / "perturbations" / name)
-                e["attributions"][mid] = {"method": meth, "png": f"samples/{sdir.name}/perturbations/{name}"}
+                lay = "act" if mid == "densenet161" else "block11"
+                e["attributions"][mid] = {"method": meth, "method_label": X.method_label(meth), "layer": lay, "layer_label": X.layer_label(mid, lay, meth),
+                                          "png": f"samples/{sdir.name}/perturbations/{name}"}
             out.append(e)
         return out
 
@@ -374,6 +434,7 @@ class Exporter:
                 v = np.load(val, allow_pickle=True)
                 t = M.fit_temperature(v["probs"], v["labels"].astype(int))
                 rep["temperature_fit_on_val"] = t
+                rep["temperature"] = t  # schema-1.1 alias of temperature_fit_on_val
                 rep["ece_after_temperature"] = M.reliability(M.apply_temperature(p, t), y)["ece"]
             per_model[mid] = rep
             order = np.argsort(z["ids"])
@@ -412,6 +473,11 @@ class Exporter:
                     preds_n = {m2: int(dict(zip(preds[m2]["ids"], preds[m2]["probs"].argmax(1))).get(n, -1)) for m2 in preds}
                     mis.append({"id": n, "image": f"misclassified/{n}.png", "label": int(df.loc[df["Image_name"] == n, "label"].iloc[0]), "preds": preds_n})
         ev["misclassified"] = mis
+        pat = ec.get("label_efficiency_glob")
+        if pat and ec.get("seed_summary"):
+            summ = FZ.collect_run_summaries(pat)
+            ss = {m: FZ.seed_summary(summ, m) for m, on in ec["seed_summary"].items() if on}
+            ev["seed_summary"] = {m: v for m, v in ss.items() if v}
         write_json(ev, self.out / "evaluation.json")
         return "evaluation.json"
 
@@ -437,26 +503,47 @@ class Exporter:
         return "training_curves.json"
 
     def export_label_efficiency(self) -> Optional[str]:
-        pat = self.cfg.get("evaluation", {}).get("label_efficiency_glob")
+        ec = self.cfg.get("evaluation", {})
+        pat = ec.get("label_efficiency_glob")
         if not pat:
             return None
-        rows = []
-        for f in glob.glob(pat):
-            s = json.load(open(f))
-            c = s["config"]
-            rows.append((c["model"], c["regime"], float(c["label_fraction"]), int(c["seed"]), s["test"]["macro_f1"]))
-        if not rows:
+        summ = FZ.collect_run_summaries(pat)  # excludes *_demo runs and demo_mode summaries
+        if not summ:
             return None
-        df = pd.DataFrame(rows, columns=["model", "regime", "fraction", "seed", "macro_f1"])
-        regime = self.cfg.get("evaluation", {}).get("label_efficiency_regime", df["regime"].mode()[0])
-        df = df[df["regime"] == regime]
-        fr = sorted(df["fraction"].unique())
-        seeds = sorted(df["seed"].unique())
-        per = {}
-        for mid, g in df.groupby("model"):
-            per[mid] = {"macro_f1": [[float(g[(g.fraction == f) & (g.seed == s)]["macro_f1"].iloc[0]) if len(g[(g.fraction == f) & (g.seed == s)]) else float("nan") for s in seeds] for f in fr]}
-        write_json({"provenance": provenance(SCRIPT, params={"glob": pat}), "fractions": fr, "seeds": seeds, "regime": regime, "per_model": per}, self.out / "label_efficiency.json")
+        le = FZ.build_label_efficiency(summ, regime=ec.get("label_efficiency_regime", "finetune"),
+                                       models=tuple(ec.get("label_efficiency_models") or MODEL_IDS),
+                                       fractions=ec.get("label_efficiency_fractions"), seeds=ec.get("label_efficiency_seeds"),
+                                       provenance=provenance(SCRIPT, params={"glob": pat, "source": "summary.json test metrics"}),
+                                       notes=LE_NOTES)
+        write_json(le, self.out / "label_efficiency.json")
         return "label_efficiency.json"
+
+    def build_dataset_stats(self, df: pd.DataFrame) -> Dict:
+        """1.0 stats from the metadata frame, plus val split / machines_by_split / near-duplicates (never dropped)."""
+        base = dataset_stats(df, script=SCRIPT)
+        if "split" not in df:
+            return base
+        nd, root = None, None
+        sd = self.cfg.get("splits_dir")
+        if sd and os.path.exists(os.path.join(sd, "near_duplicates.csv")):
+            nd = pd.read_csv(os.path.join(sd, "near_duplicates.csv"))
+            sm = self.cfg.get("split_manifest")
+            if sm and os.path.exists(sm) and len(pd.read_csv(sm, usecols=["Image_name"])) != len(df):
+                nd = None  # its indices refer to the full split manifest; df is a subset
+        src = self.cfg.get("dataset_stats_source")
+        if src and os.path.exists(src):
+            with open(src, encoding="utf-8") as f:
+                root = json.load(f).get("near_duplicates")
+            if root and nd is None:
+                base["near_duplicates"] = root
+        return FZ.enrich_dataset_stats(base, df.reset_index(drop=True), nd, root, script=SCRIPT)
+
+    def export_faithfulness(self) -> Optional[str]:
+        f = self.cfg.get("faithfulness_csv")
+        if not f or not os.path.exists(f):
+            return None
+        write_json(faithfulness_json(f, provenance(SCRIPT, params={"source": f})), self.out / "faithfulness.json")
+        return "faithfulness.json"
 
     # -- orchestrate
     def run(self, df: pd.DataFrame, clean: bool = False) -> Dict:
@@ -464,7 +551,7 @@ class Exporter:
             shutil.rmtree(self.out)
         self.out.mkdir(parents=True, exist_ok=True)
         self.load_models()
-        write_json(dataset_stats(df, script=SCRIPT), self.out / "dataset_stats.json")
+        write_json(self.build_dataset_stats(df), self.out / "dataset_stats.json")
         samples = []
         if self.models:
             sel = self.select_samples(df)
@@ -480,7 +567,7 @@ class Exporter:
             "schema_version": SCHEMA_VERSION,
             "bundle_id": self.cfg.get("bundle_id", "omari-fpdb"),
             "generated_at": now_iso(),
-            "generator": {"script": SCRIPT, "version": "0.1.0", "git_commit": git_commit(), "command": self.cfg.get("_command")},
+            "generator": {"script": SCRIPT, "version": "0.2.0", "git_commit": git_commit(), "command": self.cfg.get("_command")},
             "dataset": {"name": "FETAL_PLANES_DB", "license": "CC BY 4.0", "source_url": "https://zenodo.org/records/3904280",
                         "citation": "Burgos-Artizzu et al., Sci. Rep. 10:10200 (2020)",
                         "split_protocol": "Authors' patient-level train/test split; validation = patient-disjoint 10% of training (StratifiedGroupKFold)"},
@@ -488,12 +575,54 @@ class Exporter:
             "models": self.model_info(),
             "samples": samples,
             "dataset_stats": "dataset_stats.json",
+            "sample_predictions_source": SAMPLE_PREDICTIONS_SOURCE,
+            "provenance_notes": list(self.cfg.get("provenance_notes") or []),
         }
-        for key, fn in (("evaluation", lambda: self.export_evaluation(df)), ("training_curves", self.export_curves), ("label_efficiency", self.export_label_efficiency)):
+        for key, fn in (("evaluation", lambda: self.export_evaluation(df)), ("training_curves", self.export_curves),
+                        ("label_efficiency", self.export_label_efficiency), ("faithfulness", self.export_faithfulness)):
             v = fn()
             if v:
                 manifest[key] = v
         write_json(manifest, self.out / "manifest.json")
-        (self.out / "export_log.txt").write_text("\n".join(self.log))
         self.say(f"[done] bundle written to {self.out}")
+        (self.out / "export_log.txt").write_text("\n".join(self.log), encoding="utf-8")
         return manifest
+
+
+# ------------------------------------------------------------------------------------------------ faithfulness.json
+FAITHFULNESS_META = {
+    "n_images": 30, "steps": 10, "baseline": "blurred image", "target": "true-label probability",
+    "baseline_detail": "torchvision gaussian_blur(kernel_size=51, sigma=15) of the model input (deletion_insertion default)",
+    "image_selection": "30 random test images (pandas .sample(30, random_state=42), notebook 06 MODE=full); each model's own eval transform at original resolution",
+    "layers": "each method at its default layer: DenseNet `act`; ViT/USF-MAE token Grad-CAM(++) at block11 (after block 11 of 12); rollouts over all 12 blocks",
+    "random_baseline": "method 'random' = one torch.rand(14,14) map per image and model",
+    "sd_definition": "pandas std (ddof=1) across the 30 images",
+    "verification": ("n/steps/baseline/target verified from the notebook 06 cell source (MODE=full) and python/omari_us/explainability/faithfulness.py; "
+                     "faithfulness.csv itself carries no provenance"),
+}
+
+
+def faithfulness_json(csv_path: str, prov: Dict) -> Dict:
+    rows = FZ.parse_faithfulness_csv(csv_path)
+    for r in rows:
+        if r["method"] in X.METHOD_ALIASES:
+            r["method_original"] = r["method"]
+            r["method"] = X.canonical_method(r["method"])
+        r["method_label"] = "Random map (baseline)" if r["method"] == "random" else X.method_label(r["method"])
+        if r["method"] in ("cam", "gradcam", "gradcampp"):
+            r["layer"] = "act"
+        elif r["method"] in ("vit_gradcam", "vit_gradcampp"):
+            r["layer"] = "block11"
+        else:
+            r["layer"] = "final"
+        r["layer_label"] = "n/a" if r["method"] == "random" else X.layer_label(r["model"], r["layer"], r["method"])
+    rand = {r["model"]: {k: r[k] for k in ("deletion_auc_mean", "deletion_auc_sd", "insertion_auc_mean", "insertion_auc_sd")}
+            for r in rows if r["method"] == "random"}
+    meta = FAITHFULNESS_META
+    return {"provenance": prov, "n_images": meta["n_images"], "steps": meta["steps"], "baseline": meta["baseline"], "target": meta["target"],
+            "rows": rows, "random_baseline": rand,
+            "details": {k: v for k, v in meta.items() if k not in ("n_images", "steps", "baseline", "target")},
+            "notes": ["Deletion AUC: lower = more faithful; insertion AUC: higher = more faithful (Petsiuk et al., 2018). Compare each method with its model's random baseline.",
+                      "n = 30 images, no significance test; sds of 0.2-0.29 mean most rankings are not statistically supported.",
+                      "Method id 'chefer' in the source CSV is reported as 'grad_rollout' (gradient-weighted attention rollout, inspired by Chefer et al. 2021, no LRP).",
+                      "DenseNet rows were computed with the densenet161_finetune_lf1_s0/best.pt present at notebook-06 time (the rerun weights, sha256 456847...)."]}

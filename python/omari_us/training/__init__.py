@@ -1,7 +1,11 @@
 """Fine-tuning loop shared by notebooks 02–04 and scripts/train.py.
 
 Regimes
-  frozen    linear probe: only the classification head (and fc_norm if present) is trained
+  frozen    linear probe: only the classification head (and fc_norm if present) is trained. Since 2026-11-14
+            the frozen backbone is also kept in eval mode every epoch (BatchNorm running statistics, dropout and
+            drop-path frozen; see `set_train_mode`). The frozen runs reported by the workshop (notebooks 02-04,
+            `*_frozen_lf1_s0`) were trained with the OLD behaviour (`model.train()` on the whole network: DenseNet BN
+            running stats updated, ViT dropout/drop-path active). Set `frozen_backbone_eval=False` to reproduce them.
   finetune  all parameters; ViTs use layer-wise learning-rate decay (MAE/BEiT recipe), DenseNet a lower
             backbone learning rate (backbone_lr_mult)
 
@@ -58,6 +62,9 @@ class TrainConfig:
     out_dir: str = "runs"
     run_name: Optional[str] = None
     pretrained: bool = True  # False only for smoke tests (random init, no downloads)
+    # frozen regime only: keep the frozen backbone in eval mode (True = true linear probe). False reproduces the
+    # behaviour used for the reported frozen runs (whole model in train mode).
+    frozen_backbone_eval: bool = True
 
     def name(self) -> str:
         return self.run_name or f"{self.model}_{self.regime}_lf{self.label_fraction:g}_s{self.seed}"
@@ -109,6 +116,24 @@ def param_groups(model: nn.Module, cfg: TrainConfig) -> List[Dict]:
         g = groups.setdefault(key, {"params": [], "lr": cfg.lr * scale, "weight_decay": 0.0 if no_wd else cfg.weight_decay, "lr_scale": scale})
         g["params"].append(p)
     return list(groups.values())
+
+
+def set_train_mode(model: nn.Module, cfg: TrainConfig) -> None:
+    """Put the model in training mode for one epoch.
+
+    finetune: whole model in train mode. frozen (with `cfg.frozen_backbone_eval`): the backbone is put in eval mode so
+    BatchNorm running statistics are not updated and dropout / drop-path are disabled; only the modules that own the
+    trainable head parameters (`classifier_param_names`) are in train mode. This changes neither which parameters
+    are optimised nor the gradients' targets, only the forward behaviour of the frozen part.
+    """
+    if cfg.regime != "frozen" or not cfg.frozen_backbone_eval:
+        model.train()
+        return
+    model.eval()
+    heads = tuple(h.rstrip(".") for h in classifier_param_names(model, cfg.model))
+    for name, module in model.named_modules():
+        if name and (name in heads or name.startswith(tuple(h + "." for h in heads))):
+            module.train()
 
 
 def cosine_with_warmup(optimizer, warmup_steps: int, total_steps: int):
@@ -163,7 +188,7 @@ def train(cfg: TrainConfig, splits: pd.DataFrame, progress: bool = True) -> Dict
                         **({"global_pool": cfg.usf_mae_global_pool} if cfg.model == "usf_mae" else {})).to(device)
     init_source = getattr(model, "init_source", "unknown")
     if cfg.model == "usf_mae" and cfg.usf_mae_checkpoint is None:
-        raise ValueError("usf_mae requires usf_mae_checkpoint (path to the official 100-epoch checkpoint)")
+        raise ValueError("usf_mae requires usf_mae_checkpoint (path to the official checkpoint, usf_mae_500ep.pth)")
     groups = param_groups(model, cfg)
     opt = torch.optim.AdamW(groups, lr=cfg.lr, weight_decay=cfg.weight_decay)
     steps_per_epoch = min(len(tl), cfg.max_train_batches or len(tl))
@@ -183,7 +208,7 @@ def train(cfg: TrainConfig, splits: pd.DataFrame, progress: bool = True) -> Dict
             pass
     for epoch in iterator:
         t0 = time.time()
-        model.train()
+        set_train_mode(model, cfg)  # frozen regime: backbone stays in eval mode (reported frozen runs predate this)
         tot, n = 0.0, 0
         for b, (x, y, _) in enumerate(tl):
             if cfg.max_train_batches is not None and b >= cfg.max_train_batches:

@@ -1,8 +1,59 @@
 # Validation report
 
+*Updated 2026-11-14. Part A covers post-training validation of the real Colab runs. Part B is the original pre-training build report from 2026-11-04. It is kept unchanged except for its headings, and it describes the build sandbox only.*
+
+## Part A. Post-training validation (2026-11-14)
+
+Source: `docs/POST_TRAINING_AUDIT_2026-11-14.md`. All checks were read-only, recomputed with `python -I` from `content/omari_artifacts/omari_artifacts/` (ART) on a local machine (Python 3.12.7, torch 2.6.0+cu124, timm 1.0.19, numpy 1.26, pandas 2.2, sklearn 1.5.1).
+
+### A1. What is now resolved from Part B's "blocked" list
+
+| Part B item | Status now |
+|---|---|
+| Download FETAL_PLANES_DB | Done in Colab. md5 `2a5fcc2cefb789bcc0f6c1f73e0ea43f` verified; 12,400 images, 1,792 patients |
+| USF-MAE checkpoint container / decoder | Both `usf_mae_100ep.pth` and `usf_mae_500ep.pth` contain a full encoder and decoder (254 tensors). Full sha256 values are in `docs/DATA_AND_MODEL_SOURCES.md` |
+| ImageNet weights | Downloaded and used in Colab |
+| Training on real data | **38 runs** (MODE=`full`, T4), 5.14 GPU-hours |
+| `demo` / `full` notebook modes, Colab execution | All six notebooks executed in `full` mode with no tracebacks. The executed notebooks are committed as the historical record |
+| "No model results exist" | Superseded. Results below |
+
+### A2. Checks on the real artifacts
+
+| Check | Result |
+|---|---|
+| Split protocol | Authors' official Train/Test kept; val = 10% of Train, patient-disjoint (StratifiedGroupKFold, seed 42). Sizes train 6,425 / 809 patients, val 704 / 87, test 5,271 / 896. **Patient overlap 0** across all splits |
+| Metric recomputation (all 38 runs) | Accuracy, macro-F1, balanced accuracy, per-class P/R/F1 and confusion matrices from `test_predictions.npz` **match `summary.json` exactly**. Val macro-F1 equals `best_val_macro_f1`; `best_epoch` = argmax of val F1 in all runs |
+| Test-set isolation | No test-based selection found; early stopping and checkpoint choice use val only |
+| Checkpoint integrity | sha256(`best.pt`) matches `summary.json` for **37/38** runs. Exception: `densenet161_finetune_lf1_s0`, whose file was overwritten by an interrupted rerun (see `docs/PROVENANCE.md`) |
+| `evaluation.json` vs runs | Confusion, accuracy, F1 and per-class values match; ECE/NLL match to ~1e-8; patient-cluster bootstrap CIs and McNemar tests recompute identically |
+| Label-efficiency grid | Every available cell matches its `summary.json`; missing cells (ViT < 100%, DenseNet/ViT lf1 s1–s2) are genuinely not run |
+| Original bundle (`ART/website_bundle`) | All 3,109 referenced files exist; schema 1.0. Defects (fixed by `scripts/finalize_website_bundle.py`): 1-point frozen label-efficiency curve, USF-MAE overlap note dropped, near-duplicate stats dropped, reconstructions from the 100ep checkpoint, `chefer` method label |
+| Original `ART/website_export/label_efficiency.json` | Contains bare `NaN` (invalid JSON). Not used |
+
+### A3. Verified results
+
+Test set, fine-tuned, 100% labels (patient-cluster bootstrap, 1,000 resamples):
+
+| Model | Seeds | Accuracy | Macro-F1 | 95% CI macro-F1 |
+|---|---|---|---|---|
+| DenseNet-161 | 1 | 0.9474 | 0.9425 | [0.9353, 0.9489] |
+| ViT-B/16 | 1 | 0.9465 | 0.9410 | [0.9334, 0.9480] |
+| USF-MAE (500ep) | 3 | 0.9471 ± 0.0021 | 0.9416 ± 0.0023 | s0: [0.9331, 0.9465] |
+
+Exact McNemar tests give p of 0.741 to 1.0, and Holm-adjusted p = 1 for every pair, so the models are **statistically indistinguishable**. Calibration: ECE 0.13–0.14 before temperature scaling. The models are under-confident (fitted T ≈ 0.57–0.62), and ECE after temperature scaling is about 0.01. Frozen-probe macro-F1 is 0.7657 / 0.8038 / 0.8039 (see the frozen caveat in `docs/TRAINING_PLAN.md`). Label efficiency is in the README.
+
+### A4. Not yet validated
+
+- A website build with the finalized bundle installed, and a visual check of every chapter. This is pending until `scripts/finalize_website_bundle.py` has run and `npm ci && npm run build` succeeds.
+- pytest and Vitest were not re-run as part of the post-training audit.
+- The exact label-fraction subsets are not saved. A re-implementation did not reproduce the image counts.
+- Bit-for-bit reproducibility (training is not deterministic).
+
+## Part B. Pre-training build report (2026-11-04, historical)
+
 Build environment: Linux, Python 3.13, Node 22, torch 2.15 (CPU), 2 CPU cores, no GPU. Date: 4 November 2026.
 
-## Executed and passed
+### Executed and passed (build sandbox, synthetic data)
 
 | Check | Command | Result |
 |---|---|---|
@@ -19,7 +70,7 @@ Build environment: Linux, Python 3.13, Node 22, torch 2.15 (CPU), 2 CPU cores, n
 | Provenance check on the shipped (empty) bundle folder | `python scripts/check_provenance.py website/public/experiments` | pass ("no bundle: website shows empty states") |
 | Visual review | Playwright screenshots of all 28 figures, presenter mode, 820 px tablet width | layout issues found and fixed (wide figures constrained to the text column, chapter head alignment, title offset, toy feature channels, label overlap) |
 
-## Not executed (blocked) and what it means
+### Not executed at the time (blocked), status as of 2026-11-14 in the post-training section above
 
 | Check | Why blocked | Consequence |
 |---|---|---|
@@ -31,6 +82,6 @@ Build environment: Linux, Python 3.13, Node 22, torch 2.15 (CPU), 2 CPU cores, n
 | Colab execution | not available | Setup cell logic (clone, pip, Drive) untested in Colab itself; `REPO_URL` must be set |
 | Cross-browser / screen-reader testing | Chromium only | Keyboard focus styles and ARIA labels present; no assistive-technology test performed |
 
-## Scientific results: status
+### Scientific results: status at the time (superseded)
 
 None. Every number shown during the smoke runs came from random weights on synthetic images and was written only to `/tmp`. Nothing from those runs is in the repository.

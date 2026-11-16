@@ -10,13 +10,15 @@ export function Tex({ children, display = false }: { children: string; display?:
 }
 
 /* ---------------- provenance ---------------- */
-export type ProvKind = 'live' | 'model' | 'inference' | 'illustrative' | 'missing';
+export type ProvKind = 'live' | 'data' | 'model' | 'inference' | 'illustrative' | 'missing' | 'error';
 const PROV_TEXT: Record<ProvKind, [string, string]> = {
+  data: ['Dataset metadata', 'Counted by the pipeline from the FETAL_PLANES_DB metadata CSV and the saved split files. No model is involved.'],
   live: ['Live simulation', 'Computed in your browser from exact mathematics or image processing. No trained model is involved.'],
   model: ['Model output', 'Precomputed by a trained checkpoint through the export pipeline. Hover the figure details for checkpoint and script provenance.'],
   inference: ['Live inference', 'Computed now by the local Python inference server using a trained checkpoint.'],
   illustrative: ['Illustrative', 'A toy or hypothetical example built to show a mechanism. It is not a result about ultrasound models.'],
-  missing: ['Awaiting artifact', 'This view needs outputs from a trained model that have not been exported yet.'],
+  missing: ['Awaiting artifact', 'This view needs outputs from a trained model that have not been exported yet, or the experiment was not run.'],
+  error: ['Artifact error', 'The artifact file exists but could not be read (for example, invalid JSON). Nothing is substituted; see the browser console.'],
 };
 export function Prov({ kind, detail }: { kind: ProvKind; detail?: string }) {
   const [label, text] = PROV_TEXT[kind];
@@ -25,7 +27,7 @@ export function Prov({ kind, detail }: { kind: ProvKind; detail?: string }) {
 export function ProvLegend() {
   return (
     <div className="prov-legend">
-      {(['live', 'model', 'inference', 'illustrative', 'missing'] as ProvKind[]).map((k) => (
+      {(['live', 'data', 'model', 'inference', 'illustrative', 'missing'] as ProvKind[]).map((k) => (
         <span key={k} className="row" style={{ gap: '0.45rem' }}><Prov kind={k} /><span className="muted small">{PROV_TEXT[k][1].split('.')[0]}.</span></span>
       ))}
     </div>
@@ -51,11 +53,28 @@ export function Figure({ title, prov, provDetail, caption, children, wide = true
   );
 }
 
-export function Empty({ title, children }: { title: string; children: ReactNode }) {
-  return <div className="empty" role="status"><strong>{title}</strong>{children}</div>;
+export function Empty({ title, children, error = false }: { title: string; children: ReactNode; error?: boolean }) {
+  return <div className={`empty${error ? ' error' : ''}`} role="status"><strong>{title}</strong>{children}</div>;
 }
 
-export function Deep({ title, children, kind = 'math' }: { title?: string; children: ReactNode; kind?: 'math' | 'code' | 'note' }) {
+/** Visible error state for an artifact file that exists but cannot be read (distinct from "absent"). */
+export function FileError({ message }: { message?: string }) {
+  return <Empty title="Artifact file could not be read" error>{message ?? 'Unknown error.'} Nothing is shown in its place. Fix the file (it must be valid JSON without NaN) and reload.</Empty>;
+}
+
+/** Bundle provenance notes (written for maintainers): kept verbatim but collapsed so they do not crowd the figure. */
+export function TechNotes({ notes, summary = 'Provenance notes' }: { notes?: (string | null | undefined)[] | null; summary?: string }) {
+  const list = (notes ?? []).filter((n): n is string => !!n);
+  if (!list.length) return null;
+  return (
+    <details className="tech-notes">
+      <summary>{summary} ({list.length})</summary>
+      <ul>{list.map((n) => <li key={n}>{n}</li>)}</ul>
+    </details>
+  );
+}
+
+export function Deep({ title, children, kind = 'math' }:{ title?: string; children: ReactNode; kind?: 'math' | 'code' | 'note' }) {
   const t = title ?? (kind === 'math' ? 'Mathematical details' : kind === 'code' ? 'View PyTorch implementation' : 'More detail');
   return (
     <details className="deep">
@@ -95,13 +114,15 @@ export function Slider({ label, value, min, max, step = 1, onChange, format, dis
   );
 }
 
-export function Seg<T extends string | number>({ options, value, onChange, label, disabled }: {
+export function Seg<T extends string | number>({ options, value, onChange, label, disabled, compact }: {
   options: { value: T; label: ReactNode; disabled?: boolean; title?: string }[]; value: T; onChange: (v: T) => void; label: string; disabled?: boolean;
+  /** tighter buttons for long numeric option lists (e.g. 12 blocks or heads) so they fit on one row */
+  compact?: boolean;
 }) {
   return (
     <div className="control">
       <span className="control-label"><span>{label}</span></span>
-      <div className="seg" role="group" aria-label={label}>
+      <div className={compact ? 'seg seg-compact' : 'seg'} role="group" aria-label={label}>
         {options.map((o) => (
           <button key={String(o.value)} type="button" aria-pressed={o.value === value} disabled={disabled || o.disabled} title={o.title} onClick={() => onChange(o.value)}>{o.label}</button>
         ))}

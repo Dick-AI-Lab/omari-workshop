@@ -2,10 +2,16 @@ import { useState } from 'react';
 import { ChapterHead } from '../components/shell';
 import { Ask, ProvLegend } from '../components/ui';
 import { useArtifacts } from '../data/artifacts';
+import { MODEL_IDS } from '../data/types';
+import { MODEL_META, pct } from '../components/ui';
+import { OverlapNote, ProvenanceNotes } from '../components/Disclosure';
+import { methodShort } from '../data/labels';
+import { holmAdjusted } from '../visualizations/EvalLab';
+import { summarizeGrid } from '../visualizations/LabelEfficiency';
 import { CITATIONS } from '../data/literature';
 import { OpeningChallenge } from './Ch1Opening';
 import { CamToy } from '../visualizations/XaiLabs';
-import { DetectiveLab, SanityCheckToy } from '../visualizations/Detective';
+import { DetectiveLab, FaithfulnessTable, SanityCheckToy } from '../visualizations/Detective';
 
 export function Break() {
   return (
@@ -33,12 +39,44 @@ export function Ch6Detective() {
       <p>
         <b>Plausible</b> means a map agrees with what an expert expects to see. <b>Faithful</b> means it reflects what the model actually computes. The two can come apart in both directions. A map can look anatomical while the decision rests on an overlay, and a model can use the right anatomy while the method fails to show it at 7×7 resolution. Faithfulness is assessed with interventions: occlude what the map highlights, randomise the weights, perturb the input, and see whether the model and the map change as they should.
       </p>
+      <FaithfulnessTable />
       <CamToy shortcut />
       <SanityCheckToy />
       <Ask q="Occluding the region Grad-CAM highlights drops the true-class probability from 0.97 to 0.40. What has this shown?"
         options={['The model uses the correct anatomy', 'The highlighted region matters to this model', 'Grad-CAM is faithful in general', 'Occlusion itself may be out of distribution']} multi
         reveal={<>The second and fourth. A large drop shows the region is influential for this image and this model. It does not show the region is <i>anatomically correct</i>, and it does not validate the method on other images. A grey or black occluder is also an unusual input, so part of the drop can come from distribution shift rather than missing evidence. Better practice compares with occluding a random region of the same size, uses in-distribution infills, and reports deletion and insertion curves over many images.</>} />
     </section>
+  );
+}
+
+/** Closing evidence summary: every number is read from the bundle; missing pieces say so. */
+function ClosingEvidence() {
+  const { evaluation, labelEfficiency: le, faithfulness: f, datasetStats: ds } = useArtifacts();
+  const models = MODEL_IDS.filter((m) => evaluation?.per_model[m]);
+  const comps = evaluation?.comparisons ?? [];
+  const adj = holmAdjusted(comps);
+  const minAdj = adj.length ? Math.min(...adj.map((a) => a.p)) : null;
+  // lowest fraction at which both DenseNet-161 and USF-MAE have ≥ 2 seeds
+  const lowest = le ? le.fractions.map((fr, i) => ({ fr, d: summarizeGrid(le, 'densenet161', 'macro_f1')[i], u: summarizeGrid(le, 'usf_mae', 'macro_f1')[i] }))
+    .find((x) => x.d && x.u && x.d.n >= 2 && x.u.n >= 2) : undefined;
+  const vitLow = le ? summarizeGrid(le, 'vit_b16', 'macro_f1').filter((p) => p.n > 0 && p.fraction < 1).length : 0;
+  const s10 = ds?.machines_by_split;
+  const shift = s10?.train && s10?.test ? Object.keys(s10.test).map((m) => ({ m, tr: s10.train![m] ?? 0, va: s10.val?.[m] ?? 0, te: s10.test![m] ?? 0 })).sort((a, b) => (b.te / (b.tr + 1)) - (a.te / (a.tr + 1)))[0] : undefined;
+  const eceRange = models.filter((m) => evaluation!.per_model[m]!.ece != null);
+  const worse = f ? MODEL_IDS.flatMap((m) => {
+    const r0 = f.rows.find((r) => r.model === m && r.method === 'random');
+    return r0 ? f.rows.filter((r) => r.model === m && r.method !== 'random' && r.deletion_auc_mean != null && r0.deletion_auc_mean != null && r.insertion_auc_mean != null && r0.insertion_auc_mean != null && r.deletion_auc_mean >= r0.deletion_auc_mean && r.insertion_auc_mean <= r0.insertion_auc_mean).map((r) => `${MODEL_META[m].name} ${methodShort(r.method)}`) : [];
+  }) : [];
+  const na = <span className="notrun">not available in this bundle</span>;
+  return (
+    <ul>
+      <li><b>Similar performance with all labels.</b> {models.length ? <>Test macro-F1: {models.map((m) => { const e = evaluation!.per_model[m]!; return `${MODEL_META[m].name} ${pct(e.macro_f1)}${e.ci95?.macro_f1 ? ` [${pct(e.ci95.macro_f1[0])}, ${pct(e.ci95.macro_f1[1])}]` : ''}`; }).join('; ')}.{minAdj != null ? <> Smallest Holm-adjusted McNemar p = {minAdj.toFixed(2)}{minAdj >= 0.05 ? ': no significant difference, so no ranking is supported.' : '.'}</> : ''}</> : na}</li>
+      <li><b>A possible low-label benefit of ultrasound-specific self-supervision.</b> {lowest ? <>At {pct(lowest.fr, 0)} of the labels, macro-F1 was {lowest.u.mean!.toFixed(3)} ± {lowest.u.sd?.toFixed(3) ?? '—'} for USF-MAE versus {lowest.d.mean!.toFixed(3)} ± {lowest.d.sd?.toFixed(3) ?? '—'} for DenseNet-161 (mean ± sd over seeds).{vitLow === 0 ? ' ViT-B/16 was not run below 100% labels, so architecture and pretraining data cannot be separated.' : ''} Suggestive only: USF-MAE’s pretraining corpus contained these images (unlabelled).</> : na}</li>
+      <li><b>Attribution maps have limits.</b> {f ? <>On {f.n_images ?? '?'} test images, {worse.length ? <>{worse.join(', ')} did no better than a random map on deletion or insertion</> : 'every exported method beat a random map on at least one metric'}. Better than random is still not proof of clinical reliability or causality.</> : na}</li>
+      <li><b>Scanner and domain shift.</b> {shift ? <>{shift.m}: {shift.tr} training, {s10?.val ? `${shift.va} validation, ` : ''}{shift.te} test images. Per-machine results in Chapter 4 are hypotheses for shift, not proof; external data are needed.</> : na}</li>
+      <li><b>Calibration.</b> {eceRange.length ? <>Expected calibration error before → after temperature scaling (T fitted on validation): {eceRange.map((m) => { const e = evaluation!.per_model[m]!; return `${MODEL_META[m].name} ${pct(e.ece!)} → ${e.ece_after_temperature != null ? pct(e.ece_after_temperature) : 'not exported'}`; }).join('; ')}. Calibration must be re-checked on the deployment population.</> : na}</li>
+      <li><b>External validation and clinical evaluation</b> were not part of this workshop. One public dataset from two hospitals cannot show that any of these models generalises, or that it helps sonographers in practice.</li>
+    </ul>
   );
 }
 
@@ -62,9 +100,10 @@ export function Ch7Closing() {
     <section className="chapter" id="closing">
       <ChapterHead id="closing" />
       <p className="lede">Back to the first image. You now know what each model was pretrained on, how it was fine-tuned, how it scores, and what its explanation can and cannot tell you.</p>
-      <OpeningChallenge />
+      <OpeningChallenge closing />
       <Ask q="Which model would you investigate further, and why?" options={['DenseNet-161', 'ViT-B/16', 'USF-MAE', 'None yet']}
         reveal={<>There is no single right answer; the reasoning is what matters. A good answer names the evidence that would change your mind: label-efficiency curves with seeds, external validation, calibration, and shortcut tests. It also states the caveat about USF-MAE’s pretraining overlap with this dataset.</>} />
+      <OverlapNote context="before choosing USF-MAE" />
       <h3>What would it take to deploy?</h3>
       <p>Tick what has been shown in this workshop. Most of the list cannot be shown on one public dataset, and that is the point.</p>
       <div className="ask">
@@ -75,6 +114,8 @@ export function Ch7Closing() {
         ))}
         <p className="small muted" style={{ marginBottom: 0 }}>{done.length} of {CHECKLIST.length} ticked.</p>
       </div>
+      <h3>What the experiments showed</h3>
+      <ClosingEvidence />
       <h3>What to take away</h3>
       <ul>
         <li>Prediction quality, confidence and reasoning are separate properties, measured by separate tools.</li>
@@ -95,6 +136,7 @@ export function Ch7Closing() {
       </ol>
       <h3>How to read the figures on this page</h3>
       <ProvLegend />
+      <ProvenanceNotes />
       <p className="small muted" style={{ fontFamily: 'var(--sans)' }}>
         Artifact bundle: {status === 'ready' ? `${manifest!.bundle_id} (schema ${manifest!.schema_version}, generated ${manifest!.generated_at}, ${manifest!.samples.length} samples, models: ${manifest!.models.map((m) => m.display_name).join(', ')})` : status === 'absent' ? 'none loaded. All model-output figures show their empty state.' : status}.
         {' '}Live inference server: {backend.ok ? `connected at ${backend.url}` : 'not running'}.

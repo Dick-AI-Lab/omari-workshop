@@ -3,15 +3,39 @@ bundle_id: omari-fpdb-v1
 data_root: ${DATA_ROOT}                       # folder containing FETAL_PLANES_DB_data.csv and Images/
 split_manifest: artifacts/splits/split_manifest.csv
 output_dir: website/public/experiments
-max_side: 640                                # exported sample images are capped; sample predictions use these exact pixels
+max_side: 640                                # exported sample images are capped (display only)
+splits_dir: artifacts/splits                 # near_duplicates.csv lives here; merged into dataset_stats.json
+dataset_stats_source: artifacts/dataset_stats.json   # notebook-01 stats (near-duplicate block)
+sample_predictions: npz                      # npz = take sample predictions from the headline runs' test_predictions.npz (original-resolution evaluation)
 
 models:
-  densenet161: {checkpoint: runs/densenet161_finetune_lf1_s0/best.pt}
-  vit_b16:     {checkpoint: runs/vit_b16_finetune_lf1_s0/best.pt}
+  densenet161:
+    checkpoint: runs/densenet161_finetune_lf1_s0/best.pt
+    notes: >-
+      ImageNet-1k supervised initialisation (torchvision IMAGENET1K_V1). Single seed at 100% labels (seeds 1-2 not run).
+    pretraining: {checkpoint: "torchvision DenseNet161_Weights.IMAGENET1K_V1", sha256: null, epochs: null,
+                  objective: "supervised classification", corpus: "ImageNet-1k (natural images)", overlap_with_test: "none known"}
+  vit_b16:
+    checkpoint: runs/vit_b16_finetune_lf1_s0/best.pt
+    notes: >-
+      ImageNet-1k supervised initialisation (timm vit_base_patch16_224.augreg_in1k). Single seed; trained at 100% labels only
+      (no label-efficiency sweep).
+    pretraining: {checkpoint: "timm vit_base_patch16_224.augreg_in1k", sha256: null, epochs: null,
+                  objective: "supervised classification (AugReg)", corpus: "ImageNet-1k (natural images)", overlap_with_test: "none known"}
   usf_mae:
     checkpoint: runs/usf_mae_finetune_lf1_s0/best.pt
-    pretrain_checkpoint: checkpoints/usf_mae_100ep.pth   # needed only for MAE reconstructions (decoder weights)
-    notes: "FETAL_PLANES_DB images (unlabelled) were part of USF-MAE pretraining (OpenUS-46)."
+    # Official USF-MAE checkpoint = 500 epochs (all fine-tuning runs were initialised from it); also used for MAE reconstructions.
+    pretrain_checkpoint: checkpoints/usf_mae_500ep.pth
+    pretrain_sha256: c659a06170b0f6967ae7f6d066681b8dea2c122a5f325bb8a82df11ffb3a2533
+    notes: >-
+      Encoder initialised from the USF-MAE 500-epoch self-supervised checkpoint (usf_mae_500ep.pth). FETAL_PLANES_DB images
+      (unlabelled) were part of the USF-MAE self-supervised pretraining corpus (OpenUS-46), so test images may have been seen
+      without labels during pretraining. This is not supervised label leakage, but it is transductive exposure that may favour
+      USF-MAE, especially at low label fractions and on the Voluson S10 scanner that is almost absent from the labelled training set.
+      The overlap is stated by the project configuration and has not been independently verified.
+    pretraining: {checkpoint: usf_mae_500ep.pth, sha256: c659a06170b0f6967ae7f6d066681b8dea2c122a5f325bb8a82df11ffb3a2533, epochs: 500,
+                  objective: "masked autoencoding", corpus: "OpenUS-46 (unlabelled ultrasound; includes FETAL_PLANES_DB)",
+                  overlap_with_test: "FETAL_PLANES_DB images, including test-split images, were in the unlabelled pretraining corpus (transductive exposure, not label leakage); per project configuration, not independently verified"}
 
 samples:
   split: test
@@ -36,8 +60,12 @@ evaluation:
     densenet161: {frozen: runs/densenet161_frozen_lf1_s0, finetune: runs/densenet161_finetune_lf1_s0}
     vit_b16:     {frozen: runs/vit_b16_frozen_lf1_s0, finetune: runs/vit_b16_finetune_lf1_s0}
     usf_mae:     {frozen: runs/usf_mae_frozen_lf1_s0, finetune: runs/usf_mae_finetune_lf1_s0}
-  label_efficiency_glob: runs/*_lf*_s*/summary.json
-  label_efficiency_regime: frozen
+  label_efficiency_glob: runs/*_lf*_s*/summary.json   # *_demo runs and demo_mode summaries are excluded
+  label_efficiency_regime: finetune
+  label_efficiency_models: [densenet161, vit_b16, usf_mae]
+  label_efficiency_fractions: [0.01, 0.05, 0.1, 0.25, 0.5, 1.0]
+  label_efficiency_seeds: [0, 1, 2]
+  seed_summary: {usf_mae: true}
   export_test_probabilities: true
   bootstrap: 1000
   max_misclassified: 24

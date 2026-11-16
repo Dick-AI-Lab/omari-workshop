@@ -2,7 +2,7 @@
 
   attention_maps        raw softmax(QKᵀ/√d) per block and head (forward hooks; disables fused attention)
   attention_rollout     Abnar & Zuidema (2020): R = Π_ℓ ½(Ā_ℓ + I), row-normalised; [CLS] row → 14×14
-  grad_rollout          gradient-weighted rollout: Ā_ℓ = E_h[ReLU(∂y/∂A ⊙ A)] (simplified Chefer et al. 2021, no LRP)
+  grad_rollout          gradient-weighted rollout: Ā_ℓ = E_h[ReLU(∂y/∂A ⊙ A)] (variant inspired by Chefer et al. 2021; no LRP, row-normalised rollout)
   token_gradcam(++)     Grad-CAM(++) on patch tokens at the input of blocks[b].norm1 (or output of a block),
                         reshaped 196 → 14×14 with [CLS] dropped. For the *last* block, gradients reach patch tokens
                         only through attention to [CLS], which is why the norm1 input of the final block is used.

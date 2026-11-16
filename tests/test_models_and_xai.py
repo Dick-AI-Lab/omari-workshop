@@ -93,7 +93,7 @@ def test_gradcampp_and_layers(densenet):
 
 def test_vit_methods(vit):
     x = torch.randn(1, 3, 224, 224)
-    for meth in ("vit_gradcam", "vit_gradcampp", "attention_rollout", "chefer"):
+    for meth in ("vit_gradcam", "vit_gradcampp", "attention_rollout", "grad_rollout"):
         m = X.explain(meth, "vit_b16", vit, x, 3)
         assert m.shape == (14, 14) and torch.isfinite(m).all(), meth
     before = [getattr(b.attn, "fused_attn", False) for b in vit.blocks]
@@ -101,6 +101,24 @@ def test_vit_methods(vit):
     assert [getattr(b.attn, "fused_attn", False) for b in vit.blocks] == before  # fused-attention flag restored
     assert A.shape == (12, 12, 197, 197)
     assert torch.allclose(A.sum(-1), torch.ones(12, 12, 197), atol=1e-4)
+
+
+def test_grad_rollout_rename_and_legacy_alias(vit):
+    # schema 1.1: "chefer" was renamed "grad_rollout"; the old id still resolves (old bundles) but is not listed
+    assert "grad_rollout" in X.methods_for("vit_b16") and "chefer" not in X.methods_for("vit_b16")
+    assert X.canonical_method("chefer") == "grad_rollout" and X.compatible("chefer", "usf_mae")
+    x = torch.randn(1, 3, 224, 224)
+    assert torch.allclose(X.explain("chefer", "vit_b16", vit, x, 1), X.explain("grad_rollout", "vit_b16", vit, x, 1))
+    assert X.method_label("chefer") == X.method_label("grad_rollout") == "Gradient-weighted attention rollout"
+
+
+def test_layer_labels_are_one_indexed_after_block():
+    # blockN = input of model.blocks[N] = residual stream after N blocks -> "after block N of 12"
+    assert X.layer_label("vit_b16", "block11", "vit_gradcam") == "after block 11 of 12"
+    assert X.layer_label("usf_mae", "block5", "vit_gradcampp") == "after block 5 of 12"
+    assert X.layer_label("vit_b16", "final", "attention_rollout") == "all 12 blocks (rollout)"
+    assert X.layer_label("densenet161", "features.denseblock3", "gradcam") == "dense block 3 output (14x14)"
+    assert X.layer_label("densenet161", "act", "cam").startswith("final features")
 
 
 def test_incompatible_and_reserved(vit, densenet):

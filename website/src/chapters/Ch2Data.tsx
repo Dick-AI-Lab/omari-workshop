@@ -1,7 +1,7 @@
 import { ChapterHead } from '../components/shell';
 import { Ask, Code, Deep, Tex } from '../components/ui';
 import { FETAL_PLANES_LITERATURE as LIT, USF_MAE_LITERATURE as USF } from '../data/literature';
-import { ClassBalance, LeakageLab } from '../visualizations/DataLabs';
+import { ClassBalance, LeakageLab, SplitAudit } from '../visualizations/DataLabs';
 import { PreprocessLab } from '../visualizations/PreprocessLab';
 
 export default function Ch2Data() {
@@ -61,6 +61,10 @@ densenet_eval = T.Compose([T.Grayscale(3), T.Resize((224, 224)), T.ToTensor(),
         Images from one patient share anatomy, gestational age, machine, operator and often consecutive frames. If those images straddle the train/test boundary, the test set stops measuring generalisation to new patients and starts measuring recognition of patients already seen. FETAL_PLANES_DB ships the authors’ patient-level split; we keep it, carve a patient-disjoint validation set from the training half, and check for near-duplicate images across splits in notebook 01.
       </p>
       <LeakageLab />
+      <p>
+        The real split is audited below. Patient separation is exact. Near-duplicate detection is harder: a perceptual hash flags many cross-split pairs, but at this threshold it also matches images that only share layout and overlays, so the count is a warning sign to inspect rather than proof of leakage. The scanner mix is the larger issue: one machine is common in the test half and rare in training.
+      </p>
+      <SplitAudit />
       <Deep kind="code">
         <Code>{`from sklearn.model_selection import StratifiedGroupKFold
 

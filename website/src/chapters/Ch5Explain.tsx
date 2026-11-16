@@ -20,13 +20,13 @@ export default function Ch5Explain() {
         <b>Grad-CAM</b> removes the architectural restriction by replacing <Tex>{'w_k^c'}</Tex> with the spatially averaged gradient of the class score, then keeping only positive evidence. For a GAP–linear head the two coincide up to scale. <b>Grad-CAM++</b> weights each position’s positive gradient by a factor derived from higher-order derivatives, under the assumption that the score is an exponential of the logit. It was designed to cover several instances of a class and more of each object.
       </p>
       <Tex display>{'\\alpha_k^c = \\frac{1}{Z}\\sum_{i,j}\\frac{\\partial y^c}{\\partial A_k(i,j)},\\qquad M^c_\\text{Grad-CAM} = \\mathrm{ReLU}\\Big(\\sum_k \\alpha_k^c A_k\\Big)'}</Tex>
-      <Tex display>{'w_k^{c,++} = \\sum_{i,j} a^{kc}_{ij}\\,\\mathrm{ReLU}\\!\\Big(\\frac{\\partial S^c}{\\partial A_k(i,j)}\\Big),\\qquad a^{kc}_{ij} = \\frac{(\\partial_{ij} y^c)^2}{2(\\partial_{ij} y^c)^2 + \\sum_{a,b} A_k(a,b)\\,(\\partial_{ij} y^c)^3},\\quad S^c = e^{y^c}'}</Tex>
+      <Tex display>{'\\begin{aligned} w_k^{c,++} &= \\sum_{i,j} a^{kc}_{ij}\\,\\mathrm{ReLU}\\!\\Big(\\frac{\\partial S^c}{\\partial A_k(i,j)}\\Big),\\qquad S^c = e^{y^c} \\\\ a^{kc}_{ij} &= \\frac{(\\partial_{ij} y^c)^2}{2(\\partial_{ij} y^c)^2 + \\sum_{a,b} A_k(a,b)\\,(\\partial_{ij} y^c)^3} \\end{aligned}'}</Tex>
       <CamToy />
       <Deep kind="note" title="Limitations to keep in view">
         <ul>
           <li><b>Resolution.</b> Maps live at feature-map resolution (7×7 for DenseNet-161’s last block, 14×14 for ViT tokens) and are upsampled. Fine structures such as the cavum septi pellucidi cannot be resolved; earlier layers are sharper but less class-specific.</li>
           <li><b>Gradient saturation and sign.</b> ReLU discards negative evidence; saturated logits give small, noisy gradients.</li>
-          <li><b>Normalisation hides magnitude.</b> Min–max scaling makes a weak, diffuse map look as confident as a strong one. The exporter stores the raw range for this reason.</li>
+          <li><b>Normalisation hides magnitude.</b> Min–max scaling makes a weak, diffuse map look as confident as a strong one. The exporter stores the raw range for this reason, and the laboratory below prints it under every map.</li>
           <li><b>Not a test of faithfulness.</b> A map can look anatomical while the model relies on something else, and edge-like maps can survive weight randomisation (Adebayo et al., 2018). Chapter 6 tests this.</li>
         </ul>
       </Deep>
@@ -45,9 +45,9 @@ m_gcpp = gradcampp.gradcampp(model, x, c, target_layer=model.features.norm5, pos
 
       <h3>Transformers need different machinery</h3>
       <p>
-        A ViT has no convolutional feature maps and, in timm’s default configuration, classifies from the [CLS] token rather than an average over space. CAM therefore does not apply as written. Two adaptations are common. First, treat the 196 patch tokens of a late block as a 14×14 “feature map” with 768 channels, apply Grad-CAM to it, and reshape. This requires choosing the input to the last block’s first LayerNorm, because after the final block only [CLS] feeds the head and patch-token gradients vanish. Second, trace how information flows from patches to [CLS] through attention: <b>attention rollout</b> multiplies head-averaged attention matrices (with the residual identity) across blocks, and <b>gradient-weighted rollout</b> keeps only attention that increases the target class.
+        A ViT has no convolutional feature maps and, in timm’s default configuration, classifies from the [CLS] token rather than an average over space. CAM therefore does not apply as written. Two adaptations are common. First, treat the 196 patch tokens of a late block as a 14×14 “feature map” with 768 channels, apply Grad-CAM to it, and reshape. This requires choosing the input to the last block’s first LayerNorm, because after the final block only [CLS] feeds the head and patch-token gradients vanish. Second, trace how information flows from patches to [CLS] through attention: <b>attention rollout</b> multiplies head-averaged attention matrices (with the residual identity) across blocks, and <b>gradient-weighted attention rollout</b> keeps only attention that increases the target class. Our implementation is a simplified variant inspired by Chefer et al. (2021); it does not use their layer-wise relevance propagation (LRP).
       </p>
-      <Tex display>{'\\tilde A^{(\\ell)} = \\tfrac12\\big(\\bar A^{(\\ell)} + I\\big),\\qquad R = \\tilde A^{(L)}\\cdots\\tilde A^{(1)},\\qquad M_\\text{rollout} = R_{[\\text{CLS}],\\,1:N}\\ \\to\\ 14\\times 14'}</Tex>
+      <Tex display>{'\\begin{aligned} \\tilde A^{(\\ell)} &= \\tfrac12\\big(\\bar A^{(\\ell)} + I\\big),\\qquad R = \\tilde A^{(L)}\\cdots\\tilde A^{(1)} \\\\ M_\\text{rollout} &= R_{[\\text{CLS}],\\,1:N}\\ \\to\\ 14\\times 14 \\end{aligned}'}</Tex>
       <Tex display>{'\\bar A^{(\\ell)}_\\text{grad} = \\mathbb{E}_h\\Big[\\mathrm{ReLU}\\Big(\\frac{\\partial y^c}{\\partial A^{(\\ell)}_h}\\odot A^{(\\ell)}_h\\Big)\\Big]'}</Tex>
       <p>
         Keep the distinction from Chapter 3 sharp. <b>Attention visualisation</b> shows routing inside the network and is the same whichever class you ask about. <b>Class-specific gradient attribution</b> asks what would change a particular score. A model can attend to the skull and still decide from the depth marker.

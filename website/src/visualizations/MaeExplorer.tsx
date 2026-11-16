@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { ImagePicker } from '../components/ImagePicker';
 import { Empty, Figure, GrayCanvas, Prov, Seg, Slider, fmtM, pct } from '../components/ui';
 import { loadGrayPNG, useArtifacts } from '../data/artifacts';
+import { shortSha, usfEpochs } from '../data/labels';
+import { usfCheckpointText } from '../components/Disclosure';
 import { useImageSource } from '../data/imageSource';
 import { maeDecoderParams, vitEncoderMACs, vitParams } from '../lib/architectures';
 import { Gray, makeGray, resize } from '../lib/imageOps';
@@ -41,18 +43,33 @@ export function MaskingExplorer() {
   const src = useImageSource();
   const { manifest } = useArtifacts();
   const img = useMemo(() => resize(src.gray, 224, 224, 'nearest'), [src.gray]);
-  const recs = src.sample?.reconstructions ?? [];
-  const ratios = Array.from(new Set(recs.map((r) => r.mask_ratio))).sort();
-  const [ratio, setRatio] = useState(0.75);
+  const primary = src.sample?.reconstructions ?? [];
+  const legacy = src.sample?.reconstructions_legacy ?? [];
+  // 'primary' = what the bundle marks as the main reconstructions (500ep when generated); 'legacy' = historical 100ep
+  const [which, setWhich] = useState<'primary' | 'legacy'>('primary');
+  const recs = which === 'legacy' && legacy.length ? legacy : primary;
+  const ratios = Array.from(new Set(recs.map((r) => r.mask_ratio))).sort((a, b) => a - b);
+  const real = ratios.length > 0;
+  const [freeRatio, setFreeRatio] = useState(0.75);
   const [seed, setSeed] = useState(0);
   const [view, setView] = useState<'model' | 'naive'>('model');
-  const exported = recs.find((r) => Math.abs(r.mask_ratio - ratio) < 1e-6 && r.seed === seed) ?? recs.find((r) => Math.abs(r.mask_ratio - ratio) < 1e-6);
+  // with exported reconstructions the slider snaps to the exported ratios (index slider); otherwise it is free
+  const ratio = real ? ratios.reduce((best, r) => (Math.abs(r - freeRatio) < Math.abs(best - freeRatio) ? r : best), ratios[0]) : freeRatio;
+  const exported = real ? recs.find((r) => Math.abs(r.mask_ratio - ratio) < 1e-6) : undefined;
   const mask = useMemo(() => {
     if (exported) { const m = new Array(G * G).fill(false); exported.masked.forEach((i) => (m[i] = true)); return m; }
     return randomMask(G * G, ratio, seed + 1);
   }, [exported, ratio, seed]);
   const [recImg, setRecImg] = useState<Gray | null>(null);
-  useEffect(() => { let c = false; setRecImg(null); if (exported) loadGrayPNG(exported.pasted_png ?? exported.reconstruction_png).then((g) => !c && setRecImg(g)); return () => { c = true; }; }, [exported]);
+  const [recErr, setRecErr] = useState<string | null>(null);
+  useEffect(() => {
+    let c = false; setRecImg(null); setRecErr(null);
+    if (exported) {
+      const p = exported.pasted_png ?? exported.reconstruction_png;
+      loadGrayPNG(p).then((g) => !c && setRecImg(g)).catch((e) => { console.error('[mae] reconstruction', p, e); if (!c) setRecErr(p); });
+    }
+    return () => { c = true; };
+  }, [exported]);
   const masked = useMemo(() => applyMask(img, mask), [img, mask]);
   const naive = useMemo(() => naiveFill(img, mask), [img, mask]);
   const visible = mask.filter((m) => !m).length;
@@ -63,15 +80,29 @@ export function MaskingExplorer() {
     mask.forEach((m, i) => (g.data[i] = m ? 0 : 1));
     return g;
   }, [mask]);
-  const model = manifest?.models.find((m) => m.id === 'usf_mae');
+  const ckpt = exported?.provenance.checkpoint_id ?? undefined;
+  const ep = usfEpochs(ckpt);
+  const recProv = exported ? `${ckpt ?? 'checkpoint not recorded'}${exported.provenance.checkpoint_sha256 ? ` · sha256 ${shortSha(exported.provenance.checkpoint_sha256)}…` : ''}` : '';
+  const historical = ep === 100;
+  const classifierCkpt = usfCheckpointText(manifest);
   return (
-    <Figure title="Masked autoencoding: learn by filling in the gaps" prov={exported ? ['live', 'model'] : ['live', 'missing']} provDetail={exported ? `${exported.provenance.script} · ${exported.provenance.checkpoint_id}` : undefined}
-      caption={<>MAE removes a random subset of patches (uniform noise, keep the lowest-scoring 1−r), encodes only the visible patches, and asks a light decoder to predict the pixels of the masked ones. The masking and the compute arithmetic are live. A reconstruction is shown only if it was produced by the USF-MAE decoder for this image, mask ratio and seed{ratios.length ? ` (exported ratios: ${ratios.map((r) => pct(r, 0)).join(', ')})` : ''}. The naive baseline exists only to show what a <i>non-learned</i> fill looks like.</>}>
+    <Figure title="Masked autoencoding: learn by filling in the gaps" prov={exported ? ['live', 'model'] : ['live', 'missing']} provDetail={exported ? `${exported.provenance.script} · ${recProv}` : undefined}
+      caption={<>MAE removes a random subset of patches (uniform noise, keep the lowest-scoring 1−r), encodes only the visible patches, and asks a light decoder to predict the pixels of the masked ones. The masking and the compute arithmetic are live. A reconstruction is shown only if it was produced by the USF-MAE decoder for this image and mask{real ? <>; the slider snaps to the exported ratios ({ratios.map((r) => pct(r, 0)).join(', ')}) and uses the exported mask (seed {exported?.seed ?? 0})</> : ''}. The fine-tuned USF-MAE classifier in this workshop was initialised from {classifierCkpt}.{historical && <> <b>The reconstructions shown come from the historical 100-epoch checkpoint</b>, not from the checkpoint the classifier was fine-tuned from.</>} The naive baseline exists only to show what a <i>non-learned</i> fill looks like.</>}>
       <ImagePicker compact />
       <div className="split-wide">
         <div className="controls">
-          <Slider label="Mask ratio r" value={ratio} min={0} max={0.95} step={0.05} onChange={setRatio} format={(v) => pct(v, 0)} ticks={ratios} />
-          <div className="row"><button className="btn" onClick={() => setSeed((s) => s + 1)}>New random mask</button><span className="small muted">seed {seed}</span></div>
+          {legacy.length > 0 && (
+            <Seg label="Reconstruction checkpoint" value={which} onChange={setWhich} options={[
+              { value: 'primary', label: usfEpochs(primary[0]?.provenance.checkpoint_id) === 500 ? '500-epoch (used for this workshop)' : 'Primary' },
+              { value: 'legacy', label: 'Historical, 100-epoch checkpoint' },
+            ]} />
+          )}
+          {real
+            ? <Slider label="Mask ratio r (exported values)" value={ratios.indexOf(ratio)} min={0} max={ratios.length - 1} step={1} onChange={(i) => setFreeRatio(ratios[i])} format={(i) => pct(ratios[i] ?? ratio, 0)} />
+            : <>
+              <Slider label="Mask ratio r" value={freeRatio} min={0} max={0.95} step={0.05} onChange={setFreeRatio} format={(v) => pct(v, 0)} />
+              <div className="row"><button className="btn" onClick={() => setSeed((s) => s + 1)}>New random mask</button><span className="small muted">live mask, seed {seed}</span></div>
+            </>}
           <Seg label="Masked-patch view" value={view} onChange={setView} options={[{ value: 'model', label: 'USF-MAE reconstruction' }, { value: 'naive', label: 'Naive fill (not MAE)' }]} />
           <table className="data small">
             <tbody>
@@ -91,9 +122,14 @@ export function MaskingExplorer() {
           </div>
           <div className="stack" style={{ gap: '0.3rem' }}>
             {view === 'naive' ? <><GrayCanvas img={naive} label="naive neighbour fill" /><Prov kind="illustrative" /></> :
-              recImg ? <><GrayCanvas img={recImg} label={`USF-MAE · MSE ${exported!.loss_masked_mse.toFixed(4)}`} /><Prov kind="model" detail={model?.checkpoint_id} /></> :
+              recImg ? <>
+                <GrayCanvas img={recImg} label={`USF-MAE${ep ? ` ${ep}ep` : ''} · MSE ${exported!.loss_masked_mse.toFixed(4)}`} />
+                <Prov kind="model" detail={recProv} />
+                <span className="small muted">Checkpoint: {recProv}{historical ? ' — historical, 100-epoch checkpoint' : ''}</span>
+              </> :
+                recErr ? <Empty title="Reconstruction file could not be loaded" error>{recErr}</Empty> :
                 <Empty title="No authentic reconstruction for this setting">
-                  {src.kind !== 'sample' ? 'Select an exported sample. ' : ''}Reconstructions require the USF-MAE checkpoint <i>with</i> decoder weights; run notebook 04 with <code>--export-reconstructions</code>. Nothing is synthesised in its place.
+                  {src.kind !== 'sample' ? 'Select an exported sample. ' : ''}Reconstructions require the USF-MAE pretraining checkpoint <i>with</i> decoder weights (<code>finalize_website_bundle.py --reconstruct</code>). Nothing is synthesised in its place.
                 </Empty>}
           </div>
         </div>
@@ -104,7 +140,7 @@ export function MaskingExplorer() {
 
 export function PretrainFinetuneFigure() {
   const [stage, setStage] = useState<'pretrain' | 'finetune'>('pretrain');
-  const W = 680, H = 170;
+  const W = 720, H = 170;
   const box = (x: number, w: number, label: string, sub: string, on: boolean, color = 'var(--ink)') => (
     <g transform={`translate(${x}, 50)`}>
       <rect width={w} height={62} rx={5} fill={on ? '#fff' : '#f0f3f5'} stroke={on ? color : 'var(--rule-strong)'} strokeWidth={on ? 2 : 1} strokeDasharray={on ? undefined : '4 3'} />
@@ -116,17 +152,18 @@ export function PretrainFinetuneFigure() {
   const pre = stage === 'pretrain';
   return (
     <Figure title="Two stages, one encoder" prov="illustrative"
-      caption={<>Schematic. <b>Pretraining</b> (done once by the USF-MAE authors on ≈370k unlabelled ultrasound images): masked patches in, pixels out, loss only on masked patches. <b>Fine-tuning</b> (what notebook 04 does): discard the decoder, feed all 196 patches, attach a 6-way linear head, and train on labelled FETAL_PLANES_DB images. Frozen-encoder “linear probing” updates only the head; full fine-tuning updates everything, usually with layer-wise learning-rate decay.</>}>
+      caption={<>Schematic. <b>Pretraining</b> (done once by the USF-MAE authors on ≈370k unlabelled ultrasound images; this workshop uses their 500-epoch checkpoint): masked patches in, pixels out, loss only on masked patches. <b>Fine-tuning</b> (what notebook 04 does): discard the decoder, feed all 196 patches, attach a 6-way linear head, and train on labelled FETAL_PLANES_DB images. Frozen-encoder “linear probing” updates only the head; full fine-tuning updates everything, usually with layer-wise learning-rate decay.</>}>
       <Seg label="Stage" value={stage} onChange={setStage} options={[{ value: 'pretrain', label: 'Self-supervised pretraining' }, { value: 'finetune', label: 'Supervised fine-tuning' }]} />
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="MAE pretraining versus fine-tuning schematic">
         <defs><marker id="ah" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink-2)" /></marker></defs>
-        {box(0, 120, pre ? 'Masked image' : 'Full image', pre ? '25% of 196 patches' : '196 patches', true)}
-        {arrow(120, 160)}
-        {box(160, 150, 'ViT-B/16 encoder', pre ? 'trained' : 'initialised from USF-MAE', true, 'var(--m-usfmae)')}
-        {arrow(310, 350)}
-        {box(350, 150, pre ? 'Decoder (8×512)' : 'Linear head (768→6)', pre ? 'mask tokens + positions' : 'new, random init', true, pre ? 'var(--ink-2)' : 'var(--m-densenet)')}
-        {arrow(500, 540)}
-        {box(540, 140, pre ? 'Pixels of masked patches' : 'Plane probabilities', pre ? 'MSE on masked only' : 'cross-entropy vs label', true)}
+        {/* boxes inset by 2 px so 2 px strokes are not clipped at the viewBox edges */}
+        {box(2, 118, pre ? 'Masked image' : 'Full image', pre ? '25% of 196 patches' : '196 patches', true)}
+        {arrow(120, 150)}
+        {box(150, 165, 'ViT-B/16 encoder', pre ? 'trained' : 'initialised from USF-MAE', true, 'var(--m-usfmae)')}
+        {arrow(315, 345)}
+        {box(345, 150, pre ? 'Decoder (8×512)' : 'Linear head (768→6)', pre ? 'mask tokens + positions' : 'new, random init', true, pre ? 'var(--ink-2)' : 'var(--m-densenet)')}
+        {arrow(495, 525)}
+        {box(525, 193, pre ? 'Pixels of masked patches' : 'Plane probabilities', pre ? 'MSE on masked only' : 'cross-entropy vs label', true)}
         <text x={W / 2} y={150} textAnchor="middle" style={{ fill: 'var(--ink-3)' }}>{pre ? 'No labels used. Learns what ultrasound images look like.' : 'Labels used. Learns which representation directions separate the six planes.'}</text>
       </svg>
     </Figure>

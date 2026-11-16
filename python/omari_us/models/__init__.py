@@ -2,7 +2,8 @@
 
   densenet161  torchvision DenseNet-161, DenseNet161_Weights.IMAGENET1K_V1 (supervised ImageNet-1k)
   vit_b16      timm vit_base_patch16_224.augreg_in1k (supervised ImageNet-1k, AugReg; Steiner et al. 2022)
-  usf_mae      timm ViT-B/16 initialised from the USF-MAE encoder checkpoint (self-supervised, ultrasound)
+  usf_mae      timm ViT-B/16 initialised from the USF-MAE encoder checkpoint (self-supervised, ultrasound);
+               the official checkpoint is `usf_mae_500ep.pth` (see `usf_mae.USF_MAE_CHECKPOINTS`)
 
 `build_model(..., pretrained=False)` gives random initialisation (tests, smoke runs). Fine-tuned checkpoints
 saved by omari_us.training are loaded with `load_finetuned`.

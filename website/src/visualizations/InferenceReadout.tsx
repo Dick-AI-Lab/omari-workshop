@@ -3,7 +3,8 @@ import { useArtifacts } from '../data/artifacts';
 import { useImageSource } from '../data/imageSource';
 import type { ModelId, PerturbationEntry, Prediction } from '../data/types';
 import { Gray } from '../lib/imageOps';
-import { Empty, Prov } from '../components/ui';
+import { Empty, GrayCanvas, Prov } from '../components/ui';
+import { loadGrayPNG } from '../data/artifacts';
 import { PredictionBars } from './PredictionBars';
 
 function grayToPngBase64(g: Gray): string {
@@ -14,6 +15,13 @@ function grayToPngBase64(g: Gray): string {
   for (let i = 0, j = 0; i < g.data.length; i++, j += 4) { const v = Math.round(g.data[i] * 255); id.data[j] = v; id.data[j + 1] = v; id.data[j + 2] = v; id.data[j + 3] = 255; }
   ctx.putImageData(id, 0, 0);
   return c.toDataURL('image/png').split(',')[1];
+}
+
+/** The perturbed image the exporter actually fed to the models (loaded only when a match is shown). */
+function ExportedImage({ path, label }: { path: string; label: string }) {
+  const [g, setG] = useState<Gray | null>(null);
+  useEffect(() => { let c = false; setG(null); loadGrayPNG(path).then((x) => !c && setG(x)).catch((e) => console.error('[perturbation] image', path, e)); return () => { c = true; }; }, [path]);
+  return g ? <GrayCanvas img={g} label={label} style={{ maxWidth: '16rem' }} /> : null;
 }
 
 export async function liveInference(url: string, img: Gray, models: ModelId[]): Promise<Partial<Record<ModelId, Prediction>>> {
@@ -52,7 +60,7 @@ export function InferenceReadout({ match, transformed, isIdentity, onApply }: { 
         {isIdentity && base ? <Prov kind="model" /> : match ? <Prov kind="model" detail={`${match.provenance.script} · ${match.label}`} /> : live && !live.err ? <Prov kind="inference" /> : <Prov kind="missing" />}
       </div>
       {isIdentity && base && Object.keys(base).length ? <PredictionBars preds={base} truth={src.sample?.label} /> :
-        match ? <><PredictionBars preds={match.predictions} truth={src.sample?.label} /><span className="muted small">Precomputed for “{match.label}”. Stochastic perturbations used the exported noise realisation, not the one drawn in your browser.</span></> :
+        match ? <><PredictionBars preds={match.predictions} truth={src.sample?.label} /><span className="muted small">Precomputed by the pipeline for “{match.label}” on the image below (the exported perturbed image, not the browser rendering on the left). Stochastic perturbations used the exported noise realisation, not the one drawn in your browser.</span><ExportedImage path={match.image_png} label={`exported: ${match.label}`} /></> :
         live && !live.err ? <PredictionBars preds={live.preds} truth={src.sample?.label} /> :
         (
           <Empty title={src.kind === 'phantom' ? 'Models are not run on the phantom' : 'No verified prediction for these settings'}>

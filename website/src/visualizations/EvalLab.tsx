@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { LineChart, MatrixTable } from '../components/charts';
-import { Empty, Figure, GrayCanvas, MODEL_META, Prov, Seg, Slider, pct } from '../components/ui';
+import { Empty, FileError, Figure, GrayCanvas, MODEL_META, Prov, Seg, Slider, TechNotes, pct } from '../components/ui';
+import { OverlapNote } from '../components/Disclosure';
+import type { Comparison, Evaluation, PerModelEval } from '../data/types';
+import { holm, holmFromNote, mean as meanOf, sd as sdOf } from '../lib/stats';
+import { LabelEfficiencyFigure } from './LabelEfficiency';
 import { loadGrayPNG, useArtifacts } from '../data/artifacts';
 import { CLASS_SHORT, FETAL_PLANES_LITERATURE as LIT } from '../data/literature';
 import { MODEL_IDS, type ModelId } from '../data/types';
@@ -13,13 +17,37 @@ function useEvalModels() {
   return MODEL_IDS.filter((m) => evaluation?.per_model[m]);
 }
 
+/** Fitted temperature, whatever the exporter called it. */
+export const fittedT = (e?: PerModelEval) => e?.temperature_fit_on_val ?? e?.temperature ?? null;
+
+/** Bootstrap description read from evaluation.provenance.params (never assumed). */
+export function bootstrapText(ev: Evaluation): string {
+  const p = (ev.provenance.params ?? {}) as Record<string, unknown>;
+  const n = p.bootstrap ?? p.n_bootstrap ?? p.bootstrap_samples;
+  const cluster = p.cluster ?? p.bootstrap_cluster;
+  if (!n && !cluster) return '95% intervals: bootstrap settings not recorded in this bundle';
+  return `95% intervals are percentile bootstrap${n ? ` (${n} resamples)` : ''}${cluster ? ` resampling whole ${cluster}s (${cluster}-cluster bootstrap), which respects the correlation between images of the same ${cluster}` : ' over test images (image-level; optimistic when images cluster within patients)'}`;
+}
+
+/** Holm-adjusted p-values: exported field, else parsed from the note, else computed here from the raw p-values. */
+export function holmAdjusted(cs: Comparison[]): { p: number; source: 'exported' | 'computed' }[] {
+  const computed = holm(cs.map((c) => c.p_value));
+  return cs.map((c, i) => {
+    const e = c.p_holm ?? c.p_value_holm ?? c.p_adjusted ?? holmFromNote(c.note);
+    return e != null && Number.isFinite(e) ? { p: e, source: 'exported' } : { p: computed[i], source: 'computed' };
+  });
+}
+
 export function EvaluationSummary() {
-  const { evaluation } = useArtifacts();
+  const { evaluation, files } = useArtifacts();
   const models = useEvalModels();
   const [model, setModel] = useState<ModelId>('densenet161');
   const [cell, setCell] = useState<[number, number] | null>(null);
   const [metric, setMetric] = useState<'f1' | 'precision' | 'recall'>('f1');
   const m = models.includes(model) ? model : models[0];
+  if (files.evaluation?.state === 'error') {
+    return <Figure title="Test-set performance" prov="error"><FileError message={files.evaluation.message} /></Figure>;
+  }
   if (!evaluation || !m) {
     return (
       <Figure title="Test-set performance" prov="missing" caption="Confusion matrices, per-class metrics and confidence intervals are read from evaluation.json, written by notebook 05 from saved test-set predictions.">
@@ -38,9 +66,12 @@ export function EvaluationSummary() {
     return tp.labels[i] === cell[0] && pred === cell[1];
   }) : [];
   const misc = evaluation.misclassified ?? [];
+  const comps = evaluation.comparisons ?? [];
+  const adj = holmAdjusted(comps);
+  const anySig = adj.some((a) => a.p < 0.05);
   return (
     <Figure title="Test-set performance" prov="model" provDetail={`${evaluation.provenance.script} · ${evaluation.provenance.generated_at}`}
-      caption={<>{evaluation.split} split, n = {evaluation.n}. Rows are expert labels, columns are predictions, cells are row percentages (recall on the diagonal). Click a cell to list its images. 95% intervals are percentile bootstrap over test images{evaluation.comparisons?.length ? '; pairwise tests are McNemar on the same images' : ''}. Because test images cluster within patients, image-level bootstrap intervals are optimistic.</>}>
+      caption={<>{evaluation.split} split, n = {evaluation.n}; fine-tuned on 100% of the training labels (seed 0 for every model). Rows are expert labels, columns are predictions, cells are row percentages (recall on the diagonal). Click a cell to list its images. {bootstrapText(evaluation)}.{comps.length ? ' Pairwise tests are exact McNemar tests on the same test images, Holm-adjusted for the three comparisons; McNemar pairs images and ignores patient clustering.' : ''} ECE is shown before and after temperature scaling with T fitted on the validation set.</>}>
       <div className="row" style={{ marginBottom: '0.7rem' }}>
         <Seg label="Model" value={m} onChange={(v) => { setModel(v); setCell(null); }} options={models.map((id) => ({ value: id, label: MODEL_META[id].name }))} />
       </div>
@@ -59,15 +90,23 @@ export function EvaluationSummary() {
                 })}</tr>
               ))}
               <tr><td>ECE (10 bins)</td>{models.map((id) => <td key={id} className="num">{evaluation.per_model[id]!.ece != null ? pct(evaluation.per_model[id]!.ece!) : '—'}</td>)}</tr>
+              <tr><td>ECE after temperature</td>{models.map((id) => { const e = evaluation.per_model[id]!; return <td key={id} className="num">{e.ece_after_temperature != null ? pct(e.ece_after_temperature) : <span className="notrun">not exported</span>}</td>; })}</tr>
+              <tr><td>Fitted T (validation)</td>{models.map((id) => { const t = fittedT(evaluation.per_model[id]); return <td key={id} className="num">{t != null ? t.toFixed(2) : <span className="notrun">not exported</span>}</td>; })}</tr>
             </tbody>
           </table>
-          {evaluation.comparisons?.map((c) => <p key={c.a + c.b} className="small muted" style={{ margin: '0.3rem 0' }}>{MODEL_META[c.a].name} vs {MODEL_META[c.b].name}: {c.test}, statistic {c.statistic.toFixed(2)}, p = {c.p_value < 0.001 ? '<0.001' : c.p_value.toFixed(3)}{c.note ? ` (${c.note})` : ''}</p>)}
+          {comps.length > 0 && <>
+            {comps.map((c, i) => <p key={c.a + c.b} className="small muted" style={{ margin: '0.3rem 0' }}>{MODEL_META[c.a].name} vs {MODEL_META[c.b].name}: {c.test}, statistic {c.statistic.toFixed(0)}, p = {c.p_value < 0.001 ? '<0.001' : c.p_value.toFixed(3)}, Holm-adjusted p = {adj[i].p < 0.001 ? '<0.001' : adj[i].p.toFixed(2)}{adj[i].source === 'computed' ? ' (computed here from the exported p-values)' : ''}.</p>)}
+            <p className="small" style={{ margin: '0.4rem 0' }}>{anySig
+              ? 'At least one pairwise difference is significant after Holm adjustment; check its size and interval before ranking the models.'
+              : <>At 100% labels <b>no pairwise difference is statistically significant</b> (all Holm-adjusted p ≥ 0.05). This does not show the models are equivalent; it shows this test set cannot separate them, so no ranking is supported.</>}</p>
+          </>}
           <div style={{ marginTop: '0.8rem' }}>
             <Seg label="Per-class metric" value={metric} onChange={setMetric} options={[{ value: 'f1', label: 'F1' }, { value: 'precision', label: 'Precision' }, { value: 'recall', label: 'Recall' }]} />
             <PerClassGrouped models={models} metric={metric} />
           </div>
         </div>
       </div>
+      <TechNotes notes={evaluation.notes} />
       {cell && (
         <div style={{ marginTop: '1rem' }}>
           <b className="small">True {CLASS_SHORT[cell[0]]} → predicted {CLASS_SHORT[cell[1]]}: {cellItems.length} images</b>
@@ -196,6 +235,8 @@ export function CalibrationLab() {
   const rel = useMemo(() => reliability(scaled, data.labels, 10), [scaled, data]);
   const rel1 = useMemo(() => reliability(data.probs, data.labels, 10), [data]);
   const bins = rel.bins.filter((b) => b.count > 0);
+  const pm = evaluation?.per_model[model];
+  const Tfit = realProbs ? fittedT(pm) : null;
   return (
     <Figure title="Is 95% confident 95% correct?" prov={realProbs ? ['model', 'live'] : ['illustrative', 'live']}
       caption={<>Reliability diagram: test predictions are grouped by top-class confidence. A calibrated model lies on the diagonal. Expected calibration error (ECE) is the bin-weighted gap. The temperature slider rescales log-probabilities, <i>p</i> ∝ exp(log <i>p</i> / T). In practice <b>T must be fitted on the validation set</b> (notebook 05 does this); adjusting it on the test set, as here, is for intuition only. {realProbs ? '' : <b>No predictions exported: showing a synthetic over-confident classifier (illustrative).</b>}</>}>
@@ -207,7 +248,23 @@ export function CalibrationLab() {
         </div>
         <div className="controls">
           {realProbs && <Seg label="Model" value={model} onChange={setModel} options={models.map((id) => ({ value: id, label: MODEL_META[id].name }))} />}
-          <Slider label="Temperature T (what-if)" value={T} min={0.3} max={4} step={0.05} onChange={setT} format={(v) => v.toFixed(2)} />
+          <Slider label="Temperature T (what-if)" value={T} min={0.3} max={4} step={0.01} onChange={setT} format={(v) => v.toFixed(2)} />
+          {realProbs && (Tfit != null
+            ? <div className="row"><button className="btn" onClick={() => setT(Math.round(Tfit * 100) / 100)}>Apply T fitted on validation ({Tfit.toFixed(2)})</button><button className="btn" onClick={() => setT(1)}>T = 1</button></div>
+            : <span className="notrun">No validation-fitted temperature in this bundle.</span>)}
+          {realProbs && pm && (
+            <table className="data small">
+              <thead><tr><th>Exported (notebook 05)</th><th className="num">value</th></tr></thead>
+              <tbody>
+                <tr><td>ECE before scaling</td><td className="num">{pm.ece != null ? pct(pm.ece) : '—'}</td></tr>
+                <tr><td>Fitted T (validation NLL)</td><td className="num">{Tfit != null ? Tfit.toFixed(3) : '—'}</td></tr>
+                <tr><td>ECE after scaling (test)</td><td className="num">{pm.ece_after_temperature != null ? pct(pm.ece_after_temperature) : '—'}</td></tr>
+              </tbody>
+            </table>
+          )}
+          {Tfit != null && <p className="small" style={{ margin: 0 }}>{Tfit < 1
+            ? <>The fitted T is below 1, so scaling <b>sharpens</b> the probabilities: this model is <b>under-confident</b> on average (a common effect of label smoothing and class-weighted loss), the opposite of the classic over-confident network.</>
+            : <>The fitted T is above 1, so scaling softens the probabilities: this model is over-confident on average.</>}</p>}
           <table className="data">
             <tbody>
               <tr><td>ECE at T = 1</td><td className="num">{pct(rel1.ece)}</td></tr>
@@ -273,7 +330,7 @@ export function ThresholdLab() {
 const thin = (a: number[], n = 200) => (a.length <= n ? a : a.filter((_, i) => i % Math.ceil(a.length / n) === 0 || i === a.length - 1));
 
 export function LearningCurves() {
-  const { labelEfficiency: le, curves } = useArtifacts();
+  const { curves } = useArtifacts();
   const [regime, setRegime] = useState<string>('');
   const [model, setModel] = useState<ModelId>('densenet161');
   const regimes = curves ? Array.from(new Set(Object.values(curves.per_model).flatMap((r) => Object.keys(r ?? {})))) : [];
@@ -282,16 +339,7 @@ export function LearningCurves() {
   const cm = cModels.includes(model) ? model : cModels[0];
   return (
     <>
-      <Figure title="How many labels does each representation need?" prov={le ? 'model' : 'missing'} provDetail={le ? `${le.provenance.script} · regime: ${le.regime}` : undefined}
-        caption={le ? <>Test macro-F1 when fine-tuning on a fraction of the training labels, sampled <b>by patient</b> and stratified by class (regime: {le.regime}). Lines are means over {le.seeds.length} seed{le.seeds.length === 1 ? '' : 's'}; bands show min–max. This is where differences in pretraining are expected to matter most.</> : 'Produced by notebook 05 from label-fraction runs of notebooks 02–04 (fractions 1%–100%, several seeds).'}>
-        {le ? (
-          <LineChart xLog xLabel="fraction of training labels" yLabel="macro-F1" xTickFormat={(v) => pct(v, v < 0.1 ? 0 : 0)} yTickFormat={(v) => v.toFixed(2)}
-            series={MODEL_IDS.filter((m) => le.per_model[m]).map((m) => {
-              const rows = le.per_model[m]!.macro_f1;
-              return { name: MODEL_META[m].name, color: MODEL_META[m].color, x: le.fractions, y: rows.map((r) => r.reduce((a, b) => a + b, 0) / r.length), band: [rows.map((r) => Math.min(...r)), rows.map((r) => Math.max(...r))] };
-            })} />
-        ) : <Empty title="No label-efficiency runs exported">Run notebooks 02–04 with <code>LABEL_FRACTIONS = [0.01, 0.05, 0.1, 0.25, 0.5, 1.0]</code>, then notebook 05.</Empty>}
-      </Figure>
+      <LabelEfficiencyFigure />
       <Figure title="Training and validation curves" prov={curves ? 'model' : 'missing'}
         caption="Loss on training and patient-disjoint validation data, with validation macro-F1 (dashed) on the same axis. Diverging train and validation loss marks the onset of overfitting; the checkpoint kept is the one with the best validation macro-F1.">
         {curves && cm ? <>
@@ -305,6 +353,7 @@ export function LearningCurves() {
               { name: 'validation loss', color: 'var(--ink)', x: c.epoch, y: c.val_loss },
               { name: 'validation macro-F1', color: 'var(--p-model)', x: c.epoch, y: c.val_macro_f1, dashed: true },
             ]} />); })()}
+          {(curves.notes ?? []).length > 0 && <ul className="small muted" style={{ fontFamily: 'var(--sans)' }}>{curves.notes!.map((n) => <li key={n}>{n}</li>)}</ul>}
         </> : <Empty title="No training curves exported">Notebooks 02–04 write <code>history.json</code> per run; notebook 05 collects them into <code>training_curves.json</code>.</Empty>}
       </Figure>
     </>
@@ -312,8 +361,9 @@ export function LearningCurves() {
 }
 
 export function DomainShiftTable() {
-  const { evaluation } = useArtifacts();
+  const { evaluation, datasetStats } = useArtifacts();
   const models = useEvalModels();
+  const mbs = datasetStats?.machines_by_split;
   const machines = Array.from(new Set(models.flatMap((m) => Object.keys(evaluation?.per_model[m]?.by_machine ?? {}))));
   if (!machines.length) {
     return (
@@ -322,15 +372,73 @@ export function DomainShiftTable() {
       </Figure>
     );
   }
+  // Read-only facts derived from the exported per-image test predictions (no metric is recomputed):
+  // classes absent from a machine's test images, and machines on which every model predicts identically.
+  const tp = evaluation?.test_predictions;
+  const perMachine = tp?.machines ? machines.map((mc) => {
+    const idx = tp.machines!.map((x, i) => (x === mc ? i : -1)).filter((i) => i >= 0);
+    const absent = CLASS_SHORT.map((_, c) => c).filter((c) => !idx.some((i) => tp.labels[i] === c));
+    const argmax = (row: number[]) => row.indexOf(Math.max(...row));
+    const preds = models.map((m) => tp.probs[m]).filter((p): p is number[][] => !!p);
+    const identical = preds.length > 1 && idx.length > 0 && idx.every((i) => preds.every((p) => argmax(p[i]) === argmax(preds[0][i])));
+    return { mc, absent, identical };
+  }) : [];
+  const withAbsent = perMachine.filter((x) => x.absent.length);
+  const allSame = perMachine.filter((x) => x.identical);
   return (
     <Figure title="Performance by ultrasound machine" prov="model"
-      caption="Macro-F1 on test images from each machine. Subgroups are small and confounded with hospital, operator, period and case mix, so differences are hypotheses for shift, not proof of it. A stronger test trains on some machines and evaluates on a held-out one (leave-one-machine-out), which notebook 05 supports.">
+      caption={<>Accuracy and macro-F1 on test images from each machine, for the 100%-label models. Subgroups are small and confounded with hospital, operator, period and case mix, so differences are hypotheses for shift, not proof of it. {mbs ? 'The training and validation columns show how much of each machine the models saw during training and model selection.' : ''} A stronger test trains on some machines and evaluates on a held-out one (leave-one-machine-out); that was not run here.
+        {withAbsent.map(({ mc, absent }) => <> <b>{mc}</b> has no test images of {absent.map((c) => CLASS_SHORT[c].toLowerCase()).join(', ')}; its macro-F1 still averages over all six classes, so each absent class counts as zero and the value is not comparable with the other rows.</>)}
+        {allSame.map(({ mc }) => <> On every <b>{mc}</b> test image the three models predict the same class, which is why their numbers in that row are identical (not a display error).</>)}</>}>
+      <div style={{ overflowX: 'auto' }}>
       <table className="data">
-        <thead><tr><th>Machine</th>{models.map((m) => <th key={m} className="num" style={{ color: MODEL_META[m].text }}>{MODEL_META[m].name}</th>)}<th className="num">n</th></tr></thead>
-        <tbody>{machines.map((mc) => <tr key={mc}><td>{mc}</td>{models.map((m) => { const b = evaluation!.per_model[m]!.by_machine?.[mc]; return <td key={m} className="num">{b ? pct(b.macro_f1) : '—'}</td>; })}<td className="num">{evaluation!.per_model[models[0]]!.by_machine?.[mc]?.n ?? '—'}</td></tr>)}</tbody>
+        <thead><tr><th>Machine</th>{models.map((m) => <th key={m} className="num" style={{ color: MODEL_META[m].text }}>{MODEL_META[m].name}<br /><span className="muted small">acc · macro-F1</span></th>)}<th className="num">n test</th>{mbs?.train && <th className="num">n train</th>}{mbs?.val && <th className="num">n val</th>}</tr></thead>
+        <tbody>{machines.map((mc) => <tr key={mc}><td>{mc}</td>{models.map((m) => { const b = evaluation!.per_model[m]!.by_machine?.[mc]; return <td key={m} className="num">{b ? <>{pct(b.accuracy)} · {pct(b.macro_f1)}</> : '—'}</td>; })}<td className="num">{evaluation!.per_model[models[0]]!.by_machine?.[mc]?.n ?? '—'}</td>{mbs?.train && <td className="num">{mbs.train[mc] ?? 0}</td>}{mbs?.val && <td className="num">{mbs.val[mc] ?? 0}</td>}</tr>)}</tbody>
       </table>
+      </div>
     </Figure>
   );
 }
 
 export { Prov };
+
+/** Seed-to-seed spread of the headline USF-MAE runs (evaluation.seed_summary, schema 1.1). */
+export function SeedSpread() {
+  const { evaluation } = useArtifacts();
+  const ss = evaluation?.seed_summary;
+  const entries = MODEL_IDS.filter((m) => ss?.[m]).map((m) => [m, ss![m]!] as const);
+  if (!entries.length) {
+    return (
+      <Figure title="How much does a different random seed change the result?" prov="missing" wide={false}
+        caption="Repeated fine-tuning runs with different seeds show how much of a difference between models could be noise.">
+        <Empty title="Seed summary not in this bundle">Schema 1.1 bundles add <code>evaluation.seed_summary</code> from the per-seed run summaries.</Empty>
+      </Figure>
+    );
+  }
+  return (
+    <Figure title="How much does a different random seed change the result?" prov="model" wide={false}
+      caption={<>Test metrics of the same recipe fine-tuned with different random seeds (100% labels). Mean ± sd, where sd is the {entries[0][1].sd_definition ?? `sample standard deviation (ddof = ${entries[0][1].sd_ddof ?? 1})`}. {MODEL_IDS.filter((m) => evaluation?.per_model[m] && !ss?.[m]).map((m) => MODEL_META[m].name).join(' and ') || 'No other model'} (no seed summary in this bundle): seed spread unknown; differences between models smaller than this spread should not be interpreted.</>}>
+      <table className="data small">
+        <thead><tr><th>Model</th><th>Seed</th><th className="num">Accuracy</th><th className="num">Macro-F1</th></tr></thead>
+        <tbody>
+          {entries.flatMap(([m, s]) => [
+            ...s.seeds.map((sd, i) => <tr key={`${m}${sd}`}><td style={{ color: MODEL_META[m].text }}>{MODEL_META[m].name}</td><td>{sd}{s.runs?.[i] ? <span className="muted"> · {s.runs[i]}</span> : ''}</td><td className="num">{s.accuracy[i] != null ? pct(s.accuracy[i]!, 2) : 'not run'}</td><td className="num">{s.macro_f1[i] != null ? pct(s.macro_f1[i]!, 2) : 'not run'}</td></tr>),
+            <tr key={m + 'mean'}><td colSpan={2}><b>mean ± sd</b></td>
+              <td className="num"><b>{fmtMeanSd(s.mean?.accuracy ?? meanOf(s.accuracy), s.sd?.accuracy ?? sdOf(s.accuracy))}</b></td>
+              <td className="num"><b>{fmtMeanSd(s.mean?.macro_f1 ?? meanOf(s.macro_f1), s.sd?.macro_f1 ?? sdOf(s.macro_f1))}</b></td></tr>,
+          ])}
+        </tbody>
+      </table>
+      {entries.some(([, s]) => s.note) && <p className="small muted">{entries.map(([, s]) => s.note).filter(Boolean).join(' ')}</p>}
+    </Figure>
+  );
+}
+
+const fmtMeanSd = (m: number | null | undefined, s: number | null | undefined) => (m == null ? '—' : `${pct(m, 2)}${s != null ? ` ± ${(s * 100).toFixed(2)}` : ''}`);
+
+/** USF-MAE overlap disclosure placed next to the headline comparison. */
+export function EvalOverlapNote() {
+  const { evaluation } = useArtifacts();
+  if (!evaluation?.per_model.usf_mae) return null;
+  return <OverlapNote context="when comparing USF-MAE with the other models" />;
+}

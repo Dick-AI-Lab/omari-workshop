@@ -1,0 +1,173 @@
+{
+  "run": "usf_mae_finetune_lf0.5_s2",
+  "best_epoch": 18,
+  "best_val_macro_f1": 0.9574788329900258,
+  "test": {
+    "confusion": [
+      [
+        344,
+        0,
+        0,
+        1,
+        0,
+        13
+      ],
+      [
+        3,
+        1462,
+        0,
+        0,
+        0,
+        7
+      ],
+      [
+        0,
+        1,
+        489,
+        0,
+        0,
+        34
+      ],
+      [
+        4,
+        1,
+        0,
+        620,
+        0,
+        35
+      ],
+      [
+        1,
+        0,
+        0,
+        0,
+        643,
+        1
+      ],
+      [
+        31,
+        15,
+        128,
+        26,
+        5,
+        1407
+      ]
+    ],
+    "accuracy": 0.941946499715424,
+    "macro_f1": 0.9374844058585645,
+    "balanced_accuracy": 0.9494047386128684,
+    "per_class": [
+      {
+        "precision": 0.8981723237597912,
+        "recall": 0.9608938547486033,
+        "f1": 0.9284750337381915,
+        "support": 358
+      },
+      {
+        "precision": 0.9885057471264368,
+        "recall": 0.9932065217391305,
+        "f1": 0.9908505591324975,
+        "support": 1472
+      },
+      {
+        "precision": 0.7925445705024311,
+        "recall": 0.933206106870229,
+        "f1": 0.8571428571428571,
+        "support": 524
+      },
+      {
+        "precision": 0.9582689335394127,
+        "recall": 0.9393939393939394,
+        "f1": 0.9487375669472073,
+        "support": 660
+      },
+      {
+        "precision": 0.9922839506172839,
+        "recall": 0.9968992248062015,
+        "f1": 0.9945862335653518,
+        "support": 645
+      },
+      {
+        "precision": 0.9398797595190381,
+        "recall": 0.8728287841191067,
+        "f1": 0.9051141846252814,
+        "support": 1612
+      }
+    ]
+  },
+  "n_train_images": 2965,
+  "n_train_patients": 406,
+  "init_source": "USF-MAE encoder usf_mae_500ep.pth sha256:c659a06170b0",
+  "checkpoint_sha256": "877a7567e182575910cae2a52d7df0066cab42bb2a6d2773493619845726f6b7",
+  "config": {
+    "model": "usf_mae",
+    "regime": "finetune",
+    "epochs": 25,
+    "batch_size": 32,
+    "lr": 0.0002,
+    "weight_decay": 0.05,
+    "warmup_epochs": 3,
+    "layer_decay": 0.75,
+    "backbone_lr_mult": 0.1,
+    "loss": "weighted_ce",
+    "weight_scheme": "inverse",
+    "label_smoothing": 0.1,
+    "focal_gamma": 2.0,
+    "label_fraction": 0.5,
+    "seed": 2,
+    "num_workers": 2,
+    "amp": true,
+    "patience": 6,
+    "usf_mae_checkpoint": "/content/drive/MyDrive/omari_artifacts/checkpoints/usf_mae_500ep.pth",
+    "usf_mae_global_pool": "token",
+    "input_overrides": {
+      "size": 224,
+      "resize": "stretch",
+      "interpolation": "nearest",
+      "mean": [
+        0.485,
+        0.456,
+        0.406
+      ],
+      "std": [
+        0.229,
+        0.224,
+        0.225
+      ]
+    },
+    "augment": {
+      "rotation": 10,
+      "scale": [
+        0.85,
+        1.0
+      ],
+      "hflip": 0.5,
+      "brightness": 0.15,
+      "contrast": 0.15
+    },
+    "max_train_batches": null,
+    "max_eval_batches": null,
+    "out_dir": "/content/drive/MyDrive/omari_artifacts/runs",
+    "run_name": null,
+    "pretrained": true
+  },
+  "input": {
+    "size": 224,
+    "resize": "stretch",
+    "interpolation": "nearest",
+    "mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "std": [
+      0.229,
+      0.224,
+      0.225
+    ],
+    "channels": 3
+  },
+  "finished": "2026-11-11T18:41:33+00:00",
+  "git_commit": null,
+  "demo_mode": false
+}

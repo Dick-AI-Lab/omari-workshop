@@ -1,12 +1,15 @@
 import { ChapterHead } from '../components/shell';
 import { Ask, Code, Deep, ModelTag, Tex } from '../components/ui';
 import { USF_MAE_LITERATURE as USF } from '../data/literature';
+import { useArtifacts } from '../data/artifacts';
+import { OverlapNote, usfCheckpointText } from '../components/Disclosure';
 import { ConvExplorer, DenseBlockFigure, DenseNetActivations, ReceptiveFieldFigure } from '../visualizations/CnnExplorers';
 import { MaskingExplorer, PretrainFinetuneFigure } from '../visualizations/MaeExplorer';
 import { ModelComparisonTable } from '../visualizations/ModelCards';
 import { AttentionExplorer, PatchExplorer } from '../visualizations/VitExplorers';
 
 export default function Ch3Models() {
+  const { manifest } = useArtifacts();
   return (
     <section className="chapter" id="models">
       <ChapterHead id="models" />
@@ -61,12 +64,12 @@ for name in ["denseblock1", "denseblock2", "denseblock3", "denseblock4"]:
       <Deep kind="math">
         <Tex display>{'\\mathbf{z}_0 = \\big[\\mathbf{x}_\\text{cls};\\; \\mathbf{x}_p^1 E;\\; \\ldots;\\; \\mathbf{x}_p^{N} E\\big] + E_\\text{pos},\\qquad E \\in \\mathbb{R}^{(P^2 C)\\times D},\\ E_\\text{pos}\\in\\mathbb{R}^{(N+1)\\times D}'}</Tex>
         <Tex display>{'\\mathbf{z}\'_\\ell = \\mathrm{MSA}(\\mathrm{LN}(\\mathbf{z}_{\\ell-1})) + \\mathbf{z}_{\\ell-1},\\qquad \\mathbf{z}_\\ell = \\mathrm{MLP}(\\mathrm{LN}(\\mathbf{z}\'_\\ell)) + \\mathbf{z}\'_\\ell'}</Tex>
-        <Tex display>{'\\mathrm{Attn}(Q,K,V) = \\mathrm{softmax}\\!\\Big(\\frac{QK^\\top}{\\sqrt{d_h}}\\Big)V,\\quad Q = \\mathbf{z}W_Q^{(h)},\\ K = \\mathbf{z}W_K^{(h)},\\ V = \\mathbf{z}W_V^{(h)},\\quad d_h = D/H = 64'}</Tex>
+        <Tex display>{'\\begin{gathered} \\mathrm{Attn}(Q,K,V) = \\mathrm{softmax}\\!\\Big(\\frac{QK^\\top}{\\sqrt{d_h}}\\Big)V \\\\ Q = \\mathbf{z}W_Q^{(h)},\\ K = \\mathbf{z}W_K^{(h)},\\ V = \\mathbf{z}W_V^{(h)},\\quad d_h = D/H = 64 \\end{gathered}'}</Tex>
         <p>MAE’s fixed 2D sin-cos code uses half the channels for the column index and half for the row, each <Tex>{'[\\sin(p\\,\\omega_i), \\cos(p\\,\\omega_i)]'}</Tex> with <Tex>{'\\omega_i = 10000^{-i/(D/4)}'}</Tex>. Supervised ViT-B/16 learns <Tex>{'E_\\text{pos}'}</Tex> freely.</p>
       </Deep>
       <AttentionExplorer />
       <p>
-        Attention maps are seductive because they look like explanations. They are not. A weight <Tex>{'A_{ij}'}</Tex> says how much token <i>j</i>’s value vector is mixed into token <i>i</i> at one layer and one head. It ignores the magnitude of those value vectors, the residual stream that bypasses attention, the MLPs, and every other layer. Different heads can attend to completely different places with similar effect on the output. Methods that account for this (attention rollout, gradient-weighted relevance) come in Chapter 5.
+        Attention maps are seductive because they look like explanations. They are not. A weight <Tex>{'A_{ij}'}</Tex> says how much token <i>j</i>’s value vector is mixed into token <i>i</i> at one layer and one head. It ignores the magnitude of those value vectors, the residual stream that bypasses attention, the MLPs, and every other layer. Different heads can attend to completely different places with similar effect on the output. Methods that account for this (attention rollout, gradient-weighted rollout) come in Chapter 5. Keep two things apart: <b>attention</b> is routing and is identical whichever class you ask about; <b>class-specific attribution</b> asks what would change one class score.
       </p>
       <Deep kind="code">
         <Code>{`import timm, torch
@@ -88,7 +91,7 @@ cls_to_patches = attn[11][:, :, 0, 1:]   # (B, 12, 196) -> reshape to 14x14`}</C
         ImageNet pretraining teaches features for colour photographs of objects: textures, edges and shapes under natural lighting. Ultrasound has no colour, its texture is speckle, its geometry is set by the probe, and its classes differ in subtle anatomy. Ultrasound labels are also scarce and expensive. Self-supervised pretraining avoids labels by inventing a task whose answer is in the data itself.
       </p>
       <p>
-        USF-MAE applies masked autoencoding (He et al., 2022) to {USF.pretrainingImages}. The encoder is a standard ViT-B/16; the decoder is used only during pretraining. To solve the task the encoder has to model anatomy, speckle statistics and acquisition geometry well enough to predict what is hidden.
+        USF-MAE applies masked autoencoding (He et al., 2022) to {USF.pretrainingImages}. The encoder is a standard ViT-B/16; the decoder is used only during pretraining. To solve the task the encoder has to model anatomy, speckle statistics and acquisition geometry well enough to predict what is hidden. Every USF-MAE result in this workshop was fine-tuned from the <b>500-epoch</b> pretrained checkpoint ({usfCheckpointText(manifest)}).
       </p>
       <MaskingExplorer />
       <Deep kind="math">
@@ -100,14 +103,12 @@ cls_to_patches = attn[11][:, :, 0, 1:]   # (B, 12, 196) -> reshape to 14x14`}</C
       <Deep kind="code">
         <Code>{`from omari_us.models.usf_mae import load_usf_mae_checkpoint, mae_to_vit_classifier
 
-ckpt = load_usf_mae_checkpoint("checkpoints/usf_mae_100ep.pth")   # verifies keys and shapes, reports decoder presence
+ckpt = load_usf_mae_checkpoint("checkpoints/usf_mae_500ep.pth")   # 500-epoch pretrained checkpoint; verifies keys and shapes
 model = mae_to_vit_classifier(ckpt, num_classes=6, global_pool="token")  # timm VisionTransformer, MAE encoder weights
 # MAE fine-tuning recipe: AdamW, layer-wise lr decay 0.65-0.75, drop-path 0.1, warm-up + cosine schedule
 param_groups = layer_decay_groups(model, base_lr=5e-4, layer_decay=0.65, weight_decay=0.05)`}</Code>
       </Deep>
-      <div className="aside">
-        <b>Data overlap to keep in mind.</b> {USF.overlap} The labels were never used, but the encoder may have seen the very test images during pretraining. This is a transductive advantage that ImageNet-initialised models do not have. It must be stated whenever USF-MAE results on this dataset are reported, and ideally tested with a pretraining run that excludes FETAL_PLANES_DB.
-      </div>
+      <OverlapNote context="applies to every USF-MAE result on this page">{' '}It must be stated whenever USF-MAE results on this dataset are reported, and ideally tested with a pretraining run that excludes FETAL_PLANES_DB.</OverlapNote>
 
       <Ask q="All three encoders produce a 768- or 2208-dimensional vector for the same image. Which statement is defensible before any training on FETAL_PLANES_DB?"
         options={['USF-MAE will win because it is domain-specific', 'DenseNet will win because CNNs suit small data', 'It depends on labels, regime and evaluation', 'ViT-B/16 and USF-MAE will match: same architecture']}

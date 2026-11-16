@@ -3,7 +3,14 @@
 USF-MAE (Megahed et al., BSPC 2026; https://github.com/Yusufii9/USF-MAE) pretrains Facebook's MAE
 (He et al., CVPR 2022) on ≈370k ultrasound images. Its public pretraining notebook builds
 `mae.models_mae.mae_vit_base_patch16_dec512d8b()` and first loads `mae_pretrain_vit_base_full.pth`
-(ImageNet-1k MAE). The 100-epoch checkpoint is distributed via Google Drive (see the repository README).
+(ImageNet-1k MAE). Checkpoints are distributed via Google Drive (see the USF-MAE repository README).
+
+Checkpoint used by this workshop: **`usf_mae_500ep.pth` (500 pretraining epochs) is the official model.** All
+USF-MAE fine-tuning runs reported by the workshop (19 runs, notebook 04) were initialised from it. The 100-epoch
+checkpoint (`usf_mae_100ep.pth`) is kept in `USF_MAE_CHECKPOINTS` as a *historical* entry only: it produced the MAE
+reconstructions of the original website bundle and is not the model behind any reported classification result.
+Both are pinned by SHA-256 below; `load_usf_mae_checkpoint` checks a file whose name matches a registry entry
+against its pinned hash and warns on mismatch (set `OMARI_STRICT_CHECKPOINT_SHA=1` to raise instead).
 
 This module re-implements the MAE model with *identical parameter names and shapes* using timm building
 blocks, so that the official checkpoint loads with `strict=True` without vendoring facebookresearch/mae
@@ -12,6 +19,7 @@ blocks, so that the official checkpoint loads with `strict=True` without vendori
 from __future__ import annotations
 
 import os
+import warnings
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Dict, List, Optional, Tuple
@@ -21,9 +29,67 @@ import torch
 import torch.nn as nn
 
 USF_MAE_REPO = "https://github.com/Yusufii9/USF-MAE"
-USF_MAE_100EP_GDRIVE = "https://drive.google.com/file/d/1ZPu_7KhMEuaq-XdLhVp2EEgMgLJ4dKhr/view"
-USF_MAE_100EP_GDRIVE_ID = "1ZPu_7KhMEuaq-XdLhVp2EEgMgLJ4dKhr"
-USF_MAE_500EP_GDRIVE_ID = "15n71qHXSBjEjrLtCOzvBb6gTsGhh7NUg"
+USF_MAE_100EP_GDRIVE = "https://drive.google.com/file/d/1ZPu_7KhMEuaq-XdLhVp2EEgMgLJ4dKhr/view"  # historical
+USF_MAE_100EP_GDRIVE_ID = "1ZPu_7KhMEuaq-XdLhVp2EEgMgLJ4dKhr"  # historical (original bundle reconstructions only)
+USF_MAE_500EP_GDRIVE = "https://drive.google.com/file/d/15n71qHXSBjEjrLtCOzvBb6gTsGhh7NUg/view"
+USF_MAE_500EP_GDRIVE_ID = "15n71qHXSBjEjrLtCOzvBb6gTsGhh7NUg"  # official
+
+# Pinned SHA-256 of the files as downloaded from Google Drive (verified 2026-11-14 against the copies in
+# content/omari_artifacts/omari_artifacts/checkpoints/ that the reported runs used).
+USF_MAE_500EP_SHA256 = "c659a06170b0f6967ae7f6d066681b8dea2c122a5f325bb8a82df11ffb3a2533"
+USF_MAE_100EP_SHA256 = "f815c629878c17136985af9f4fdc81c2cfa02a94e4d992c026699957f75ccb66"
+
+USF_MAE_OFFICIAL_CHECKPOINT = "usf_mae_500ep.pth"
+
+#: Registry of known USF-MAE pretraining checkpoints, keyed by file name.
+USF_MAE_CHECKPOINTS: Dict[str, Dict] = {
+    "usf_mae_500ep.pth": {
+        "epochs": 500, "status": "official", "gdrive_id": USF_MAE_500EP_GDRIVE_ID, "url": USF_MAE_500EP_GDRIVE,
+        "sha256": USF_MAE_500EP_SHA256, "size_bytes": 447764666,
+        "note": "Official workshop checkpoint: initialised all 19 reported USF-MAE fine-tuning runs.",
+    },
+    "usf_mae_100ep.pth": {
+        "epochs": 100, "status": "historical", "gdrive_id": USF_MAE_100EP_GDRIVE_ID, "url": USF_MAE_100EP_GDRIVE,
+        "sha256": USF_MAE_100EP_SHA256, "size_bytes": 447746224,
+        "note": "Historical only: produced the MAE reconstructions of the original (schema 1.0) website bundle; "
+                "not used for any reported classification result.",
+    },
+}
+
+STRICT_SHA_ENV = "OMARI_STRICT_CHECKPOINT_SHA"
+
+
+def checkpoint_info(path_or_name: str | os.PathLike) -> Optional[Dict]:
+    """Registry entry for a checkpoint path/file name, or None if the file name is not a known USF-MAE checkpoint."""
+    return USF_MAE_CHECKPOINTS.get(os.path.basename(str(path_or_name)))
+
+
+def verify_checkpoint_sha256(path: str | os.PathLike, sha256: Optional[str] = None, strict: Optional[bool] = None) -> Optional[bool]:
+    """Compare a checkpoint's SHA-256 with the pinned value for its file name.
+
+    Returns True (match), False (mismatch) or None (file name not in `USF_MAE_CHECKPOINTS`; nothing to check).
+    On mismatch a warning is issued; with `strict=True` (or env `OMARI_STRICT_CHECKPOINT_SHA=1` when strict is None)
+    a ValueError is raised instead. Pass `sha256` if already computed to avoid hashing the file twice.
+    """
+    info = checkpoint_info(path)
+    if info is None:
+        return None
+    if sha256 is None:
+        from ..utils import sha256_file
+
+        sha256 = sha256_file(path)
+    if sha256.lower() == info["sha256"]:
+        return True
+    if strict is None:
+        strict = os.environ.get(STRICT_SHA_ENV, "").strip().lower() in ("1", "true", "yes")
+    msg = (f"USF-MAE checkpoint {path} has sha256 {sha256}, but the pinned sha256 for "
+           f"{os.path.basename(str(path))} ({info['status']}, {info['epochs']} epochs) is {info['sha256']}. "
+           "The file is not the published checkpoint (corrupt/partial download, or a different/random checkpoint "
+           "saved under this name).")
+    if strict:
+        raise ValueError(msg)
+    warnings.warn(msg, stacklevel=3)
+    return False
 
 
 # ---------------------------------------------------------------- positional embeddings (MAE util/pos_embed.py)
@@ -184,6 +250,12 @@ class CheckpointReport:
     unexpected: List[str] = field(default_factory=list)
     shape_mismatches: List[Tuple[str, Tuple, Tuple]] = field(default_factory=list)
     pos_embed_is_sincos: Optional[bool] = None
+    #: True/False = file name is a registry entry and its sha256 matches/mismatches the pinned value; None = unknown name
+    sha256_matches_pinned: Optional[bool] = None
+
+    @property
+    def known_checkpoint(self) -> Optional[Dict]:
+        return checkpoint_info(self.path)
 
     @property
     def ok_for_classification(self) -> bool:
@@ -197,6 +269,10 @@ class CheckpointReport:
         lines = [f"checkpoint: {self.path}", f"sha256: {self.sha256}", f"container keys: {self.container_keys}", f"tensors: {self.n_tensors}",
                  f"encoder complete: {self.ok_for_classification}", f"decoder present: {self.has_decoder} (complete: {self.ok_for_reconstruction})",
                  f"pos_embed equals MAE sin-cos table: {self.pos_embed_is_sincos}"]
+        info = self.known_checkpoint
+        if info is not None:
+            verdict = {True: "MATCHES", False: "DOES NOT MATCH", None: "not checked"}[self.sha256_matches_pinned]
+            lines.append(f"registry: {info['status']} USF-MAE checkpoint ({info['epochs']} epochs); sha256 {verdict} pinned {info['sha256'][:12]}")
         if self.missing_encoder:
             lines.append(f"missing encoder keys ({len(self.missing_encoder)}): {self.missing_encoder[:6]}")
         if self.missing_decoder and self.has_decoder:
@@ -231,7 +307,9 @@ def _extract_state_dict(obj) -> Tuple[Dict[str, torch.Tensor], List[str]]:
 def load_usf_mae_checkpoint(path: str | os.PathLike, map_location="cpu") -> Tuple[Dict[str, torch.Tensor], CheckpointReport]:
     """Load a USF-MAE / MAE checkpoint and verify it against `mae_vit_base_patch16_dec512d8b`.
 
-    Returns (state_dict, report). Raises if the encoder is unusable.
+    Returns (state_dict, report). Raises if the encoder is unusable. If the file name is a known checkpoint
+    (`USF_MAE_CHECKPOINTS`), its sha256 is compared with the pinned value: mismatch → warning (ValueError only when
+    env `OMARI_STRICT_CHECKPOINT_SHA=1`); the result is stored in `report.sha256_matches_pinned`.
     """
     from ..utils import sha256_file
 
@@ -249,6 +327,7 @@ def load_usf_mae_checkpoint(path: str | os.PathLike, map_location="cpu") -> Tupl
     )
     if "pos_embed" in sd and sd["pos_embed"].shape == ref["pos_embed"].shape:
         rep.pos_embed_is_sincos = bool(torch.allclose(sd["pos_embed"].float(), ref["pos_embed"].float(), atol=1e-5))
+    rep.sha256_matches_pinned = verify_checkpoint_sha256(path, rep.sha256)
     if not rep.ok_for_classification:
         raise ValueError("Checkpoint is not a usable MAE ViT-B/16 encoder:\n" + rep.summary())
     return sd, rep
@@ -305,10 +384,15 @@ def reconstruct(mae: MaskedAutoencoderViT, x: torch.Tensor, mask_ratio: float, s
     return {"pred_img": pred_img, "pasted": pasted, "mask": mask, "loss": float(loss), "masked_indices": idx}
 
 
-def download_checkpoint_from_gdrive(file_id: str = USF_MAE_100EP_GDRIVE_ID, out: str = "checkpoints/usf_mae_100ep.pth") -> str:
-    """Download via `gdown` (pip install gdown). Large Google Drive files require the confirmation flow gdown handles."""
+def download_checkpoint_from_gdrive(file_id: str = USF_MAE_500EP_GDRIVE_ID, out: str = "checkpoints/" + USF_MAE_OFFICIAL_CHECKPOINT) -> str:
+    """Download via `gdown` (pip install gdown). Defaults to the official 500-epoch checkpoint.
+
+    Large Google Drive files require the confirmation flow gdown handles. After download the file's sha256 is
+    checked against the pinned value when `out` has a registry file name (warning on mismatch).
+    """
     import gdown  # type: ignore
 
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     gdown.download(id=file_id, output=out, quiet=False)
+    verify_checkpoint_sha256(out)
     return out

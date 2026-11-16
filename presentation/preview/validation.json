@@ -1,0 +1,298 @@
+{
+  "pptx": "presentation\\OMARI_From_Pixels_to_Predictions.pptx",
+  "slides": 37,
+  "passed": 58,
+  "failed": [],
+  "checks": [
+    {
+      "check": "16:9 widescreen",
+      "ok": true,
+      "detail": "12192000x6858000 EMU"
+    },
+    {
+      "check": "no shape outside slide bounds",
+      "ok": true,
+      "detail": "[]"
+    },
+    {
+      "check": "speaker notes on every slide",
+      "ok": true,
+      "detail": "[]"
+    },
+    {
+      "check": "embedded images >= 90 effective ppi",
+      "ok": true,
+      "detail": "[]"
+    },
+    {
+      "check": "densenet161 accuracy on slide/notes",
+      "ok": true,
+      "detail": "0.9474"
+    },
+    {
+      "check": "densenet161 macro_f1 on slide/notes",
+      "ok": true,
+      "detail": "0.9425"
+    },
+    {
+      "check": "densenet161 ECE before/after",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "densenet161 temperature",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "vit_b16 accuracy on slide/notes",
+      "ok": true,
+      "detail": "0.9465"
+    },
+    {
+      "check": "vit_b16 macro_f1 on slide/notes",
+      "ok": true,
+      "detail": "0.9410"
+    },
+    {
+      "check": "vit_b16 ECE before/after",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "vit_b16 temperature",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "usf_mae accuracy on slide/notes",
+      "ok": true,
+      "detail": "0.9463"
+    },
+    {
+      "check": "usf_mae macro_f1 on slide/notes",
+      "ok": true,
+      "detail": "0.9403"
+    },
+    {
+      "check": "usf_mae ECE before/after",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "usf_mae temperature",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "USF-MAE 3-seed mean \u00b1 sd",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "audit full-label table (0.9474/0.9425, 0.9465/0.9410, 0.9471\u00b10.0021/0.9416\u00b10.0023)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "McNemar p densenet161\u2013vit_b16",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "McNemar p densenet161\u2013usf_mae",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "McNemar p vit_b16\u2013usf_mae",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "5% usf_mae macro_f1 = 0.888",
+      "ok": true,
+      "detail": "0.8881"
+    },
+    {
+      "check": "5% densenet161 macro_f1 = 0.808",
+      "ok": true,
+      "detail": "0.8079"
+    },
+    {
+      "check": "5% usf_mae accuracy = 0.896",
+      "ok": true,
+      "detail": "0.8964"
+    },
+    {
+      "check": "5% densenet161 accuracy = 0.820",
+      "ok": true,
+      "detail": "0.8197"
+    },
+    {
+      "check": "ViT-B/16 low-label shown as not run",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "dataset count 12,400",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "dataset count 1,792",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "dataset count 809",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "dataset count 5,271",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "dataset count 2,685",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "dataset count 1,071",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "confusion error count",
+      "ok": true,
+      "detail": "283"
+    },
+    {
+      "check": "faithfulness densenet161 cam",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "faithfulness densenet161 gradcam",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "faithfulness densenet161 gradcampp",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "faithfulness densenet161 random",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "faithfulness usf_mae attention_rollout",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "faithfulness usf_mae grad_rollout",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "faithfulness usf_mae random",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "faithfulness usf_mae vit_gradcam",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "faithfulness usf_mae vit_gradcampp",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "faithfulness vit_b16 attention_rollout",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "faithfulness vit_b16 grad_rollout",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "faithfulness vit_b16 random",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "faithfulness vit_b16 vit_gradcam",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "faithfulness vit_b16 vit_gradcampp",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "opening reveal densenet161",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "opening reveal vit_b16",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "opening reveal usf_mae",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "reconstructions are 500-epoch",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "no 100-epoch reconstruction file embedded",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "no localhost participant URL",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "gradient-weighted attention rollout terminology",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "MetaCAM++ shown only as placeholder",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "no 'statistically equivalent' claim",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "pretraining overlap disclosed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "planned timing = 120 min",
+      "ok": true,
+      "detail": "120.0 min over 35 timed slides"
+    }
+  ]
+}

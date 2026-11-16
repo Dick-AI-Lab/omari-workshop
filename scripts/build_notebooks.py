@@ -1,14 +1,33 @@
 #!/usr/bin/env python
-"""Generate the six standalone Colab notebooks in notebooks/ from this single source.
+"""Generate the six standalone Colab notebooks from this single source.
 
-    python scripts/build_notebooks.py
+    python scripts/build_notebooks.py --out-dir /tmp/omari_nb          # write fresh notebooks elsewhere
+    python scripts/build_notebooks.py                                  # notebooks/ (refuses if they hold outputs)
+    python scripts/build_notebooks.py --force                          # overwrite even executed notebooks
+
+SAFETY: the notebooks in notebooks/ are the executed record of the reported Colab run (MODE="full", Drive artifacts,
+USF-MAE 500-epoch checkpoint, fine-tune label-efficiency sweeps for DenseNet-161 and USF-MAE). By default this script
+refuses to overwrite any existing .ipynb that contains outputs or execution counts; the check runs for all six targets
+before anything is written. Use --force only if you really mean to discard the executed record.
+
+Generated defaults vs. the executed run (all are Colab form fields, editable before running):
+  MODE                     "demo" here; the reported results used "full"
+  USE_DRIVE_FOR_ARTIFACTS  True (as executed; artifacts -> /content/drive/MyDrive/omari_artifacts)
+  REPO_URL                 https://github.com/Dick-AI-Lab/omari-workshop.git (as executed)
+  RUN_LABEL_SWEEP          False here; executed True for notebooks 02 and 04 (full mode), False for 03
+  SWEEP_REGIME             "finetune" (as executed in 02, 03, 04)
+  USF-MAE checkpoint       usf_mae_500ep.pth (official; as executed). usf_mae_100ep.pth is historical only.
+  nb06 EXPORT              False here; executed True
 
 Every notebook starts with the same setup cell (repository + packages + data + artifact folders) and has three modes:
   smoke  synthetic images + random weights: checks the code path end to end (numbers are meaningless)
   demo   real FETAL_PLANES_DB subset + real pretrained weights, few epochs (≈10–20 min on a Colab T4)
   full   complete experiments (hours on a single GPU)
 """
+import argparse
+import json
 import os
+import sys
 import textwrap
 
 import nbformat as nbf
@@ -16,12 +35,13 @@ import nbformat as nbf
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "notebooks")
 
 SETUP = r'''#@title 0 · Setup: repository, packages, data and artifact folders { display-mode: "form" }
-import os, sys, subprocess, json, random, time
+import os, sys, subprocess, json, random, time, shutil
 MODE = "demo"  #@param ["smoke", "demo", "full"]
-REPO_URL = "https://github.com/YOUR-ORG/omari-workshop.git"  #@param {type:"string"}
+# The reported workshop results were produced with MODE = "full" (Colab T4) and Drive artifacts.
+REPO_URL = "https://github.com/Dick-AI-Lab/omari-workshop.git"  #@param {type:"string"}
 DATA_ROOT = "/content/data/FETAL_PLANES_ZENODO"  #@param {type:"string"}
 ARTIFACTS = "/content/omari_artifacts"  #@param {type:"string"}
-USE_DRIVE_FOR_ARTIFACTS = False  #@param {type:"boolean"}
+USE_DRIVE_FOR_ARTIFACTS = True  #@param {type:"boolean"}
 MODE = os.environ.get("OMARI_MODE", MODE)            # lets CI / nbclient override
 ARTIFACTS = os.environ.get("OMARI_ARTIFACTS", ARTIFACTS)
 IN_COLAB = "google.colab" in sys.modules
@@ -41,13 +61,23 @@ REPO = _find_repo()
 if REPO is None:
     if "YOUR-ORG" in REPO_URL:
         raise RuntimeError("Set REPO_URL to the repository that contains python/omari_us (or upload the repo to /content/omari-workshop).")
-    subprocess.run(["git", "clone", "--depth", "1", REPO_URL, "/content/omari-workshop"], check=True)
-    REPO = "/content/omari-workshop"
+    target_dir = "/content/omari-workshop"
+    if os.path.exists(target_dir):
+        shutil.rmtree(target_dir)
+    try:
+        subprocess.run(["git", "clone", "--depth", "1", REPO_URL, target_dir], check=True)
+        REPO = target_dir
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            f"Git clone failed with code {e.returncode}. This usually means the repository URL is incorrect "
+            f"or the repository is private. If it is private, please provide a Personal Access Token in the URL: "
+            f"'https://<TOKEN>@github.com/.../omari-workshop.git'"
+        ) from e
 sys.path.insert(0, os.path.join(REPO, "python"))
 
 # 2) packages (Colab already has torch/torchvision; timm and friends are added)
 if IN_COLAB:
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "timm>=0.9.12", "scikit-learn", "scipy", "pyyaml", "opencv-python-headless", "gdown"], check=True)
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "timm>=0.9.12", "scikit-learn", "scipy", "pyyaml", "opencv-python-headless", "gdown>=5.1"], check=True)
 
 import numpy as np, pandas as pd, torch, matplotlib.pyplot as plt
 import omari_us
@@ -142,7 +172,7 @@ print(splits.groupby(["split"]).agg(images=("Image_name", "size"), patients=("Pa
 '''
 
 
-def train_cells(model_id, cfg_name, extra_kw=""):
+def train_cells(model_id, cfg_name, extra_kw="", sweep_executed=False):
     return [
         md(f"""
         ## Train: frozen encoder (linear probe) and full fine-tuning
@@ -197,7 +227,8 @@ def train_cells(model_id, cfg_name, extra_kw=""):
         """),
         code('''
         RUN_LABEL_SWEEP = False  #@param {type:"boolean"}
-        SWEEP_REGIME = "frozen"  #@param ["frozen", "finetune"]
+        SWEEP_REGIME = "finetune"  #@param ["frozen", "finetune"]
+        # Executed record (MODE="full"): RUN_LABEL_SWEEP = __SWEEP_EXECUTED__, SWEEP_REGIME = "finetune".
         if RUN_LABEL_SWEEP:
             fracs = C["label_fractions"] if MODE == "full" else [0.05, 0.25, 1.0]
             seeds = C["seeds"] if MODE == "full" else [0]
@@ -205,7 +236,7 @@ def train_cells(model_id, cfg_name, extra_kw=""):
                 for s in seeds:
                     r = train(make_cfg(SWEEP_REGIME, f, s), splits, progress=False)
                     print(r["run"], round(r["test"]["macro_f1"], 4))
-        '''),
+        '''.replace("__SWEEP_EXECUTED__", str(bool(sweep_executed)))),
     ]
 
 
@@ -337,7 +368,7 @@ def nb02():
             for h in hooks: h.remove()
             shapes
             '''),
-            *train_cells("densenet161", "densenet161.yaml"),
+            *train_cells("densenet161", "densenet161.yaml", sweep_executed=True),
             md("## Feature maps from the fine-tuned model\nTop channels by mean activation at each dense block, for one test image. The website shows the same view from exported PNGs."),
             code('''
             from omari_us.models import load_finetuned
@@ -387,7 +418,7 @@ def nb03():
                 ax.imshow(sim[q].reshape(14, 14), cmap="viridis"); ax.set_title(f"patch {q}", fontsize=7); ax.axis("off")
             plt.suptitle("learned positional-embedding similarity (random in smoke mode)"); plt.show()
             '''),
-            *train_cells("vit_b16", "vit_b16.yaml"),
+            *train_cells("vit_b16", "vit_b16.yaml", sweep_executed=False),
             md("""
             ## Attention from the fine-tuned model
             timm uses fused scaled-dot-product attention; `omari_us.explainability.vit.capture_attention` turns it off temporarily so the attention
@@ -414,23 +445,26 @@ def nb03():
 
 
 def nb04():
-    return [header(4, "USF-MAE: ultrasound foundation model adaptation", "Retrieve and verify the official 100-epoch USF-MAE checkpoint, transfer its ViT-B/16 encoder into a classifier, demonstrate masked reconstruction (if decoder weights are present), fine-tune on FETAL_PLANES_DB, and export embeddings. USF-MAE is **not** pretrained here.",
-                   "GPU recommended: demo ≈15 min, full ≈1–2 h per regime", "Google Drive access for the checkpoint (gdown); `splits/split_manifest.csv`", "`checkpoints/usf_mae_100ep.pth`, `runs/usf_mae_*`, `usf_mae_test_embeddings.npz`"),
+    return [header(4, "USF-MAE: ultrasound foundation model adaptation", "Retrieve and verify the official 500-epoch USF-MAE checkpoint (`usf_mae_500ep.pth`), transfer its ViT-B/16 encoder into a classifier, demonstrate masked reconstruction (if decoder weights are present), fine-tune on FETAL_PLANES_DB, and export embeddings. USF-MAE is **not** pretrained here.",
+                   "GPU recommended: demo ≈15 min, full ≈1–2 h per regime", "Google Drive access for the checkpoint (gdown); `splits/split_manifest.csv`", "`checkpoints/usf_mae_500ep.pth`, `runs/usf_mae_*`, `usf_mae_test_embeddings.npz`"),
             code(SETUP), code(DATA), code(LOAD_SPLITS),
             md("""
             ## 1 · Retrieve the checkpoint
-            Source: https://github.com/Yusufii9/USF-MAE (README → Checkpoints → *USF-MAE (100 epochs – recommended)*; Google Drive id `1ZPu_7KhMEuaq-XdLhVp2EEgMgLJ4dKhr`).
-            In `smoke` mode a randomly initialised MAE checkpoint in the same format is created instead.
+            Source: https://github.com/Yusufii9/USF-MAE (README → Checkpoints → *USF-MAE (500 epochs)*; Google Drive id `15n71qHXSBjEjrLtCOzvBb6gTsGhh7NUg`).
+            **`usf_mae_500ep.pth` is the official workshop checkpoint**: every reported USF-MAE result was fine-tuned from it
+            (SHA-256 `c659a06170b0f6967ae7f6d066681b8dea2c122a5f325bb8a82df11ffb3a2533`, pinned in `omari_us.models.usf_mae.USF_MAE_CHECKPOINTS`).
+            The 100-epoch checkpoint (`usf_mae_100ep.pth`) is historical in this workshop: it only produced the reconstructions of the original website bundle.
+            In `smoke` mode a randomly initialised MAE checkpoint in the same format is created instead (it will not match the pinned hash).
             """),
             code('''
-            CKPT = os.path.join(ARTIFACTS, "checkpoints", "usf_mae_100ep.pth")
+            CKPT = os.path.join(ARTIFACTS, "checkpoints", "usf_mae_500ep.pth")
             os.makedirs(os.path.dirname(CKPT), exist_ok=True)
-            from omari_us.models.usf_mae import USF_MAE_100EP_GDRIVE_ID, mae_vit_base_patch16_dec512d8b
+            from omari_us.models.usf_mae import USF_MAE_500EP_GDRIVE_ID, mae_vit_base_patch16_dec512d8b
             if MODE == "smoke":
                 torch.save({"model": mae_vit_base_patch16_dec512d8b().state_dict()}, CKPT)
             elif not os.path.exists(CKPT):
                 import gdown
-                gdown.download(id=USF_MAE_100EP_GDRIVE_ID, output=CKPT, quiet=False)
+                gdown.download(id=USF_MAE_500EP_GDRIVE_ID, output=CKPT, quiet=False)
             print(CKPT, f"{os.path.getsize(CKPT)/1e6:.0f} MB")
             '''),
             md("## 2 · Verify compatibility\n`load_usf_mae_checkpoint` strips `module.`/`model.` prefixes, compares every tensor with `mae_vit_base_patch16_dec512d8b`, checks the positional embedding equals MAE's fixed sin-cos table, and reports whether decoder weights exist."),
@@ -439,6 +473,8 @@ def nb04():
             sd, report = load_usf_mae_checkpoint(CKPT)
             print(report.summary())
             assert report.ok_for_classification, "encoder unusable"
+            if MODE != "smoke" and report.sha256_matches_pinned is False:
+                print("WARNING: sha256 differs from the pinned official checkpoint; results will not correspond to the reported runs.")
             '''),
             md("""
             ## 3 · Masked reconstruction (requires decoder weights)
@@ -474,7 +510,7 @@ def nb04():
             Report it with every USF-MAE result on this dataset. A clean test needs a USF-MAE variant pretrained without FETAL_PLANES_DB, or an external fetal test set.
             The public pretraining notebook also initialises from Facebook's ImageNet MAE checkpoint (`mae_pretrain_vit_base_full.pth`), so USF-MAE = ImageNet MAE → ultrasound MAE.
             """),
-            *train_cells("usf_mae", "usf_mae.yaml", extra_kw=', usf_mae_checkpoint=CKPT, usf_mae_global_pool=C.get("global_pool", "token")'),
+            *train_cells("usf_mae", "usf_mae.yaml", extra_kw=', usf_mae_checkpoint=CKPT, usf_mae_global_pool=C.get("global_pool", "token")', sweep_executed=True),
             md("## 5 · Embeddings for the test set\n[CLS] features of the fine-tuned encoder, saved for notebook 05 and visualised with PCA."),
             code('''
             from omari_us.models import load_finetuned
@@ -501,7 +537,7 @@ def nb04():
 def nb05():
     return [header(5, "Model evaluation and comparison", "Load the saved test predictions of all three models and compare confusion matrices, per-class precision/recall/F1, calibration (with temperature fitted on validation), label efficiency, misclassifications, machine subgroups and paired statistical tests. Export machine-readable results for the website.",
                    "CPU is fine (minutes)", "`runs/*/test_predictions.npz` from notebooks 02–04", "`website_export/{evaluation,training_curves,label_efficiency}.json`"),
-            code(SETUP),
+            code(SETUP), code(DATA),
             code('''
             from omari_us.evaluation import metrics as M
             import glob
@@ -705,14 +741,21 @@ def nb06():
             md("## 6 · Export the full website bundle\nWrites predictions, feature maps, attention, attributions, reconstructions and perturbation experiments with provenance (see `configs/export.yaml`)."),
             code('''
             EXPORT = False  #@param {type:"boolean"}
+            # Executed record (MODE="full"): EXPORT = True. The corrected schema-1.1 bundle is built by scripts/finalize_website_bundle.py.
             if EXPORT and MODE != "smoke":
                 from omari_us.export import Exporter
                 from omari_us.utils import load_yaml
                 cfg = load_yaml(os.path.join(REPO, "configs", "export.yaml"))
                 cfg["output_dir"] = os.path.join(ARTIFACTS, "website_bundle")
-                cfg["models"] = {m: {"checkpoint": sorted(glob.glob(os.path.join(RUNS, f"{m}_finetune_lf1_s0*", "best.pt")))[0]} for m in MODELS}
-                ck = os.path.join(ARTIFACTS, "checkpoints", "usf_mae_100ep.pth")
-                if "usf_mae" in cfg["models"] and os.path.exists(ck): cfg["models"]["usf_mae"]["pretrain_checkpoint"] = ck
+                # merge (do not replace) so per-model fields from export.yaml such as `notes` survive
+                yaml_models = cfg.get("models") or {}
+                cfg["models"] = {m: {**(yaml_models.get(m) or {}), "checkpoint": sorted(glob.glob(os.path.join(RUNS, f"{m}_finetune_lf1_s0*", "best.pt")))[0]} for m in MODELS}
+                # MAE reconstructions from the official 500-epoch checkpoint (the one the USF-MAE classifier was fine-tuned from)
+                from omari_us.models.usf_mae import USF_MAE_OFFICIAL_CHECKPOINT
+                ck = os.path.join(ARTIFACTS, "checkpoints", USF_MAE_OFFICIAL_CHECKPOINT)
+                if "usf_mae" in cfg["models"]:
+                    if os.path.exists(ck): cfg["models"]["usf_mae"]["pretrain_checkpoint"] = ck
+                    else: print("not found:", ck, "- reconstructions are skipped unless export.yaml points at an existing checkpoint")
                 cfg["evaluation"]["runs"] = {m: os.path.dirname(v["checkpoint"]) for m, v in cfg["models"].items()}
                 cfg["evaluation"].pop("curve_runs", None); cfg["evaluation"]["label_efficiency_glob"] = os.path.join(RUNS, "*", "summary.json")
                 Exporter(cfg).run(splits, clean=True)
@@ -720,21 +763,68 @@ def nb06():
             '''), REFS]
 
 
-def main():
-    os.makedirs(OUT, exist_ok=True)
-    specs = {
-        "01_dataset_preparation.ipynb": nb01(), "02_densenet161.ipynb": nb02(), "03_vit_b16.ipynb": nb03(),
-        "04_usf_mae.ipynb": nb04(), "05_model_evaluation.ipynb": nb05(), "06_explainability.ipynb": nb06(),
-    }
-    for name, cells in specs.items():
+NOTEBOOK_NAMES = ["01_dataset_preparation.ipynb", "02_densenet161.ipynb", "03_vit_b16.ipynb",
+                  "04_usf_mae.ipynb", "05_model_evaluation.ipynb", "06_explainability.ipynb"]
+
+
+def executed_state(path):
+    """Reason string if `path` holds an executed notebook (outputs or execution counts) or cannot be parsed, else None."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            nb = json.load(f)
+    except Exception as e:  # unreadable -> treat as protected
+        return f"cannot be parsed ({type(e).__name__}); refusing to overwrite"
+    n_out = n_exec = 0
+    for c in nb.get("cells", []):
+        if c.get("cell_type") != "code":
+            continue
+        n_out += bool(c.get("outputs"))
+        n_exec += c.get("execution_count") is not None
+    if n_out or n_exec:
+        return f"{n_out} code cells with outputs, {n_exec} with execution counts"
+    return None
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--out-dir", default=OUT, help="output directory (default: notebooks/)")
+    ap.add_argument("--force", action="store_true", help="overwrite notebooks even if they contain outputs / execution counts")
+    a = ap.parse_args(argv)
+    out = os.path.abspath(a.out_dir)
+
+    # Guard first: inspect every target before anything is built or written.
+    protected = []
+    for name in NOTEBOOK_NAMES:
+        path = os.path.join(out, name)
+        if os.path.exists(path):
+            why = executed_state(path)
+            if why:
+                protected.append((path, why))
+    if protected and not a.force:
+        print("REFUSING to overwrite executed notebooks (nothing was written):", file=sys.stderr)
+        for path, why in protected:
+            print(f"  {path}: {why}", file=sys.stderr)
+        print("Use --out-dir <other folder> to generate fresh copies, or --force to overwrite.", file=sys.stderr)
+        return 2
+
+    builders = {"01_dataset_preparation.ipynb": nb01, "02_densenet161.ipynb": nb02, "03_vit_b16.ipynb": nb03,
+                "04_usf_mae.ipynb": nb04, "05_model_evaluation.ipynb": nb05, "06_explainability.ipynb": nb06}
+    nbs = {}
+    for name in NOTEBOOK_NAMES:  # build + validate all six before writing any
         nb = nbf.v4.new_notebook()
-        nb.cells = cells
+        nb.cells = builders[name]()
         nb.metadata = {"kernelspec": {"name": "python3", "display_name": "Python 3"}, "language_info": {"name": "python"},
                        "accelerator": "GPU", "colab": {"provenance": [], "gpuType": "T4"}}
         nbf.validate(nb)
-        nbf.write(nb, os.path.join(OUT, name))
-        print("wrote", name, len(cells), "cells")
+        nbs[name] = nb
+    os.makedirs(out, exist_ok=True)
+    for name, nb in nbs.items():
+        # explicit UTF-8 (never the platform code page) so "·", "→", "≈" are not mojibaked on Windows
+        with open(os.path.join(out, name), "w", encoding="utf-8", newline="\n") as f:
+            nbf.write(nb, f)
+        print("wrote", os.path.join(out, name), len(nb.cells), "cells")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

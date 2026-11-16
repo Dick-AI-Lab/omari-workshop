@@ -50,6 +50,8 @@ body.presenting .participant-only { display: none !important; }
 .series { font-family: var(--sans); font-size: var(--fs-ui); color: var(--ink-3); margin-bottom: 1.2rem; }
 .titleblock h1 { font-size: var(--fs-h1); line-height: 1.02; letter-spacing: -0.025em; font-weight: 600; margin: 0 auto 0.4em; max-width: var(--page-col); }
 .titleblock h1 .from { display: block; font-weight: 300; color: var(--ink-2); }
+.title-authors { font-family: var(--sans); font-size: 1.1rem; font-weight: 500; color: var(--ink); line-height: 1.4; margin-bottom: 1.2rem; }
+.title-authors span { white-space: nowrap; }
 .title-sub { font-size: 1.35rem; color: var(--ink-2); line-height: 1.45; }
 .title-sub span { display: block; max-width: 44rem; }
 .title-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 1rem 2rem; font-family: var(--sans); font-size: var(--fs-small); color: var(--ink-2); border-top: 1px solid var(--rule); padding-top: 1rem; margin-top: 2.2rem; }
@@ -63,3 +65,4 @@ body.presenting .participant-only { display: none !important; }
 
 footer.colophon { border-top: 1px solid var(--rule); padding: 2rem var(--gutter) 4rem; font-family: var(--sans); font-size: var(--fs-small); color: var(--ink-3); }
 footer.colophon > * { max-width: var(--page-col); margin: 0 auto 0.6rem; }
+footer.colophon .colophon-authors { color: var(--ink-2); }

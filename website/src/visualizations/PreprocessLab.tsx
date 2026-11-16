@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Histogram } from '../components/charts';
 import { ImagePicker } from '../components/ImagePicker';
-import { Figure, GrayCanvas, Seg, Slider } from '../components/ui';
+import { Figure, GrayCanvas, MODEL_META, Seg, Slider } from '../components/ui';
+import { useArtifacts } from '../data/artifacts';
+import type { ModelId } from '../data/types';
 import { useImageSource } from '../data/imageSource';
 import {
   FitMode, Gray, NormMethod, addSpeckle, adjust, fitToSquare, histogram, normalize, simulateResolution, stats,
@@ -23,6 +25,7 @@ function overlayGrid(g: Gray, p: number, content?: { x: number; y: number; w: nu
 
 export function PreprocessLab() {
   const src = useImageSource();
+  const { manifest } = useArtifacts();
   const [brightness, setBrightness] = useState(0);
   const [contrast, setContrast] = useState(1);
   const [gamma, setGamma] = useState(1);
@@ -66,22 +69,37 @@ export function PreprocessLab() {
     return ps.find((e) => e.type === t && Math.abs(e.param - p) < 1e-6);
   }, [src.sample, changed, brightness, contrast, gamma, resFactor, speckle]);
 
+  // exported perturbation parameters, so the sliders show where verified predictions exist
+  const ticksFor = (t: string) => Array.from(new Set((src.sample?.perturbations ?? []).filter((e) => e.type === t).map((e) => e.param)));
+  // the real evaluation transform each model was trained and evaluated with (from the bundle manifest)
+  const [preset, setPreset] = useState<ModelId | 'custom'>('custom');
+  const applyPreset = (id: ModelId | 'custom') => {
+    setPreset(id);
+    const m = manifest?.models.find((x) => x.id === id);
+    if (!m) return;
+    setFit((['stretch', 'letterbox', 'centercrop'].includes(m.input.resize) ? m.input.resize : 'stretch') as FitMode);
+    setInterp(m.input.interpolation === 'nearest' ? 'nearest' : 'bilinear');
+    setNorm(m.input.mean[0] === 0.5 ? 'half' : Math.abs(m.input.mean[0] - 0.485) < 1e-6 ? 'imagenet' : 'none');
+  };
+  const presetModel = manifest?.models.find((x) => x.id === preset);
+
   const reset = () => { setBrightness(0); setContrast(1); setGamma(1); setResFactor(1); setSpeckle(0); setLooks(1); };
 
   return (
     <Figure title="Preprocessing laboratory" prov="live"
-      caption={<>Every control acts in your browser on the selected image. <b>Left</b>: intensity, resolution and speckle changes in image space. <b>Middle</b>: the exact 224×224 tensor a network would see under the chosen geometry and normalisation, with the 16-pixel ViT patch grid. <b>Right</b>: model predictions, shown only when they are verified for these exact settings. The official USF-MAE loader stretches to 224×224 with nearest-neighbour interpolation and ImageNet statistics; that is the default here.</>}>
+      caption={<>Every control acts in your browser on the selected image. <b>Left, simulated acquisition changes</b>: brightness, contrast, gamma, resolution loss and speckle simulate what a different machine or setting might do (same formulas as the pipeline's perturbation module); they are not part of training. <b>Middle, the model input transform</b>: the exact 224×224 tensor a network would see under the chosen geometry and normalisation, with the 16-pixel ViT patch grid. A model preset loads the transform that model was actually trained and evaluated with (from the bundle manifest). <b>Right</b>: model predictions, shown only when they are verified for these exact settings, from the exported perturbation grid or a running inference server. Slider tick marks show the exported settings.</>}>
       <ImagePicker />
       <div className="grid-3" style={{ alignItems: 'start' }}>
         <div className="stack">
           <GrayCanvas img={processed} label={`${src.gray.w}×${src.gray.h} · aspect ${aspect.toFixed(2)}`} />
           <Histogram bins={hOut} compare={hIn} label="intensity (dashed = original)" />
           <div className="controls">
-            <Slider label="Brightness" value={brightness} min={-0.4} max={0.4} step={0.02} onChange={setBrightness} format={(v) => (v >= 0 ? '+' : '') + v.toFixed(2)} />
-            <Slider label="Contrast (gain about 0.5)" value={contrast} min={0.3} max={2.5} step={0.05} onChange={setContrast} format={(v) => `×${v.toFixed(2)}`} />
+            <span className="small muted">Simulated acquisition changes</span>
+            <Slider label="Brightness" value={brightness} min={-0.4} max={0.4} step={0.05} onChange={(v) => setBrightness(Math.round(v * 100) / 100)} format={(v) => (v >= 0 ? '+' : '') + v.toFixed(2)} ticks={ticksFor('brightness')} />
+            <Slider label="Contrast (gain about 0.5)" value={contrast} min={0.3} max={2.5} step={0.05} onChange={(v) => setContrast(Math.round(v * 100) / 100)} format={(v) => `×${v.toFixed(2)}`} ticks={ticksFor('contrast')} />
             <Slider label="Gamma (display LUT)" value={gamma} min={0.4} max={2.5} step={0.05} onChange={setGamma} format={(v) => v.toFixed(2)} />
-            <Slider label="Resolution reduction" value={resFactor} min={1} max={8} step={1} onChange={setResFactor} format={(v) => (v === 1 ? 'native' : `1/${v}`)} />
-            <Slider label="Added speckle strength" value={speckle} min={0} max={1} step={0.05} onChange={setSpeckle} format={(v) => v.toFixed(2)} />
+            <Slider label="Resolution reduction" value={resFactor} min={1} max={8} step={1} onChange={setResFactor} format={(v) => (v === 1 ? 'native' : `1/${v}`)} ticks={ticksFor('resolution')} />
+            <Slider label="Added speckle strength" value={speckle} min={0} max={1} step={0.05} onChange={(v) => setSpeckle(Math.round(v * 100) / 100)} format={(v) => v.toFixed(2)} ticks={ticksFor('speckle')} />
             <div className="row">
               <Seg label="Looks L" value={looks} onChange={setLooks} options={[1, 2, 4, 8].map((v) => ({ value: v, label: String(v) }))} />
               <button className="btn" onClick={() => setSeed((s) => s + 1)} disabled={!speckle}>New noise draw</button>
@@ -93,13 +111,18 @@ export function PreprocessLab() {
           <GrayCanvas img={showGrid ? overlayGrid(normed.display, 16, fit === 'letterbox' ? fitted.content : undefined) : normed.display} pixelated label="network input 224×224" />
           <Histogram bins={hNet} xDomain={normed.range} label={`tensor values · μ ${sNet.mean.toFixed(2)}, σ ${sNet.std.toFixed(2)}`} color="var(--m-densenet)" />
           <div className="controls">
-            <Seg label="Geometry" value={fit} onChange={setFit} options={[
+            <Seg label="Model input transform" value={preset} onChange={applyPreset} options={[
+              ...(['densenet161', 'vit_b16', 'usf_mae'] as ModelId[]).map((id) => ({ value: id, label: MODEL_META[id].name, disabled: !manifest?.models.some((m) => m.id === id), title: 'Load the transform recorded in the bundle manifest' })),
+              { value: 'custom' as const, label: 'Custom' },
+            ]} />
+            {presetModel && <span className="small muted">Recorded for {presetModel.display_name}: {presetModel.input.size}², {presetModel.input.resize}, {presetModel.input.interpolation}, μ = {presetModel.input.mean.map((v) => v.toFixed(3)).join('/')}, σ = {presetModel.input.std.map((v) => v.toFixed(3)).join('/')}.{presetModel.input.interpolation === 'bicubic' ? ' Bicubic is approximated by bilinear in the browser.' : ''}</span>}
+            <Seg label="Geometry" value={fit} onChange={(v) => { setFit(v); setPreset('custom'); }} options={[
               { value: 'stretch', label: 'Stretch', title: 'Resize((224,224)) — distorts aspect ratio' },
               { value: 'letterbox', label: 'Letterbox', title: 'Preserve aspect ratio, pad with zeros' },
               { value: 'centercrop', label: 'Centre crop', title: 'Resize shorter side, crop centre — may cut anatomy' },
             ]} />
-            <Seg label="Interpolation" value={interp} onChange={setInterp} options={[{ value: 'nearest', label: 'Nearest' }, { value: 'bilinear', label: 'Bilinear' }]} />
-            <Seg label="Normalisation" value={norm} onChange={setNorm} options={(Object.keys(NORM_LABELS) as NormMethod[]).map((k) => ({ value: k, label: NORM_LABELS[k] }))} />
+            <Seg label="Interpolation" value={interp} onChange={(v) => { setInterp(v); setPreset('custom'); }} options={[{ value: 'nearest', label: 'Nearest' }, { value: 'bilinear', label: 'Bilinear' }]} />
+            <Seg label="Normalisation" value={norm} onChange={(v) => { setNorm(v); setPreset('custom'); }} options={(Object.keys(NORM_LABELS) as NormMethod[]).map((k) => ({ value: k, label: NORM_LABELS[k] }))} />
             <label className="row small"><input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} /> Show 16×16 patch grid (14 × 14 = 196 tokens)</label>
             <p className="small muted" style={{ margin: 0 }}>
               {fit === 'stretch' && `Horizontal scale ${fitted.scaleX.toFixed(3)} vs vertical ${fitted.scaleY.toFixed(3)}: circles become ellipses, so head shape cues change with the source aspect ratio.`}

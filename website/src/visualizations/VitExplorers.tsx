@@ -81,7 +81,7 @@ function useFullAttention(path?: string) {
   useEffect(() => {
     let c = false; setBuf(null);
     // little-endian uint16, raw attention probability × 65535 (written by omari_us.export)
-    if (path) fetch(artifactUrl(path)).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject())).then((b) => !c && setBuf(new Uint16Array(b))).catch(() => {});
+    if (path) fetch(artifactUrl(path)).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`)))).then((b) => !c && setBuf(new Uint16Array(b))).catch((e) => console.error('[attention] full matrix', path, e));
     return () => { c = true; };
   }, [path]);
   return buf;
@@ -92,8 +92,11 @@ export function AttentionExplorer() {
   const { manifest } = useArtifacts();
   const img = useMemo(() => resize(src.gray, 224, 224, 'bilinear'), [src.gray]);
   const vitModels = (['vit_b16', 'usf_mae'] as ModelId[]).filter((m) => src.sample?.attention?.[m]);
-  const [mode, setMode] = useState<'toy' | 'model'>('toy');
-  const [model, setModel] = useState<ModelId>('vit_b16');
+  // real attention is the default whenever it was exported for the selected image
+  const [modeSel, setMode] = useState<'toy' | 'model' | null>(null);
+  const mode = modeSel ?? (vitModels.length ? 'model' : 'toy');
+  const [modelSel, setModel] = useState<ModelId>('vit_b16');
+  const model = vitModels.includes(modelSel) ? modelSel : (vitModels[0] ?? modelSel);
   const [block, setBlock] = useState(11);
   const [head, setHead] = useState<number | 'mean'>('mean');
   const [query, setQuery] = useState<number | 'cls'>('cls');
@@ -101,9 +104,16 @@ export function AttentionExplorer() {
   const [temp, setTemp] = useState(0.6);
   const entry = src.sample?.attention?.[model];
   const [cls, setCls] = useState<ClsAttention | null>(null);
-  useEffect(() => { let c = false; setCls(null); if (entry) loadJSON<ClsAttention>(entry.cls).then((j) => !c && j && setCls(j)); return () => { c = true; }; }, [entry]);
+  const [clsErr, setClsErr] = useState<string | null>(null);
+  // loaded lazily, only for the image and model being viewed
+  useEffect(() => {
+    let c = false; setCls(null); setClsErr(null);
+    if (entry && mode === 'model') loadJSON<ClsAttention>(entry.cls).then((j) => { if (!c) { if (j) setCls(j); else setClsErr(`${entry.cls} not found`); } }).catch((e) => { if (!c) setClsErr(String((e as Error).message)); });
+    return () => { c = true; };
+  }, [entry, mode]);
   const fullMeta = entry?.full?.find((f) => f.block === block);
-  const full = useFullAttention(fullMeta?.path);
+  // the patch-to-patch matrix (~0.9 MB per block) is only needed for a patch query; the [CLS] row comes from cls.json
+  const full = useFullAttention(query === 'cls' ? undefined : fullMeta?.path);
   const usingModel = mode === 'model' && vitModels.includes(model) && cls;
 
   const desc = useMemo(() => patchDescriptors(img, P), [img]);
@@ -132,16 +142,17 @@ export function AttentionExplorer() {
 
   return (
     <Figure title="Self-attention: who does each token look at?" prov={usingModel ? 'model' : 'illustrative'} provDetail={usingModel ? modelInfo?.checkpoint_id : undefined}
-      caption={usingModel ? <>Attention weights from <b>{MODEL_META[model].name}</b>, block {block + 1}, {head === 'mean' ? 'mean over heads' : `head ${(head as number) + 1}`}, query = {query === 'cls' ? '[CLS]' : `patch ${query}`}. Rows of softmax(QKᵀ/√d) are exported by the pipeline with forward hooks (full patch-to-patch matrices only for selected blocks; patch-query rows are shown over patch keys, excluding the weight on [CLS]). Attention says where information is <i>mixed</i>; it is not, by itself, evidence of what drives the prediction.</> :
-        <><b>Toy attention, not a trained model.</b> Queries and keys are four hand-crafted patch statistics (mean, standard deviation, horizontal and vertical gradient energy) plus a sin-cos position code. It shows the mechanism, a softmax over similarities, and how a position term creates locality. Switch to “Model” once attention maps are exported for this image.</>}>
+      caption={usingModel ? <>Real attention weights from the fine-tuned <b>{MODEL_META[model].name}</b>, block {block + 1} of {cls?.blocks ?? 12}, {head === 'mean' ? 'mean over heads' : `head ${(head as number) + 1}`}, query = {query === 'cls' ? '[CLS]' : `patch ${query}`}. Rows of softmax(QKᵀ/√d) are exported by the pipeline with forward hooks (full patch-to-patch matrices only for selected blocks; patch-query rows are shown over patch keys, excluding the weight on [CLS]). This is <b>attention, not attribution</b>: it says where information is <i>mixed</i>, is the same for every class, and is not by itself evidence of what drives the prediction. Class-specific attribution maps are in Chapter 5.</> :
+        <><b>Toy attention, not a trained model.</b> Queries and keys are four hand-crafted patch statistics (mean, standard deviation, horizontal and vertical gradient energy) plus a sin-cos position code. It shows the mechanism, a softmax over similarities, and how a position term creates locality. {vitModels.length ? 'Switch the source to “Model” to see the real attention for this image.' : 'Real attention appears here when it has been exported for the selected image.'}</>}>
       <ImagePicker compact />
       <div className="split-wide">
         <div className="controls">
           <Seg label="Source" value={mode} onChange={setMode} options={[{ value: 'toy', label: 'Toy (illustrative)' }, { value: 'model', label: 'Model (exported)', disabled: !vitModels.length }]} />
           {mode === 'model' && vitModels.length > 0 && <>
             <Seg label="Model" value={model} onChange={setModel} options={vitModels.map((m) => ({ value: m, label: MODEL_META[m].name }))} />
-            <Slider label="Block" value={block} min={0} max={(cls?.blocks ?? 12) - 1} onChange={setBlock} format={(v) => `${v + 1} of ${cls?.blocks ?? 12}`} />
-            <Seg label="Head" value={head} onChange={setHead} options={[{ value: 'mean' as const, label: 'mean' }, ...Array.from({ length: cls?.heads ?? 12 }, (_, h) => ({ value: h, label: String(h + 1) }))]} />
+            <Seg compact label={`Block (1 = first, ${cls?.blocks ?? 12} = last)`} value={block} onChange={setBlock} options={Array.from({ length: cls?.blocks ?? 12 }, (_, b) => ({ value: b, label: String(b + 1) }))} />
+            {clsErr && <span className="small" style={{ color: '#b00020' }}>Attention file could not be read: {clsErr}</span>}
+            <Seg compact label="Head" value={head} onChange={setHead} options={[{ value: 'mean' as const, label: 'mean' }, ...Array.from({ length: cls?.heads ?? 12 }, (_, h) => ({ value: h, label: String(h + 1) }))]} />
           </>}
           {mode === 'toy' && <>
             <Slider label="Position term weight" value={posW} min={0} max={4} step={0.1} onChange={setPosW} format={(v) => v.toFixed(1)} />

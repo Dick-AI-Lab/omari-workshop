@@ -59,9 +59,16 @@ def sha256_file(path: str | os.PathLike, chunk: int = 1 << 20) -> str:
     return h.hexdigest()
 
 
+PACKAGE_DIR = Path(__file__).resolve().parent
+
+
 def git_commit(cwd: Optional[str] = None) -> Optional[str]:
+    """Short commit hash of the repository that contains this package (not of the caller's working directory,
+    which in Colab is /content). Returns None when git is unavailable or the package is not inside a git checkout."""
     try:
-        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=cwd, capture_output=True, text=True, timeout=5)
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=str(cwd or PACKAGE_DIR), capture_output=True, text=True, timeout=5)
+        if out.returncode != 0:
+            return None
         return out.stdout.strip() or None
     except Exception:
         return None
@@ -104,17 +111,34 @@ def load_yaml(path: str | os.PathLike) -> Dict[str, Any]:
     return _expand(cfg)
 
 
+def json_sanitize(obj: Any) -> Any:
+    """Recursively convert numpy scalars/arrays to Python types and non-finite floats (NaN, ±inf) to None.
+
+    Browsers' JSON.parse rejects bare NaN/Infinity, so every bundle file goes through this before json.dump."""
+    if isinstance(obj, dict):
+        return {(str(k) if not isinstance(k, str) else k): json_sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [json_sanitize(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return json_sanitize(obj.tolist())
+    if isinstance(obj, (bool, np.bool_)):
+        return bool(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, (float, np.floating)):
+        f = float(obj)
+        return f if np.isfinite(f) else None
+    return obj
+
+
 def write_json(obj: Any, path: str | os.PathLike, indent: Optional[int] = None) -> None:
+    """Write strict JSON: NaN/inf become null (see `json_sanitize`) and `allow_nan=False` guarantees none slip through."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     def _default(o):
-        if isinstance(o, (np.integer,)):
-            return int(o)
-        if isinstance(o, (np.floating,)):
-            return float(o)
-        if isinstance(o, np.ndarray):
-            return o.tolist()
+        if isinstance(o, Path):
+            return str(o)
         raise TypeError(f"not JSON serialisable: {type(o)}")
 
-    with open(path, "w") as f:
-        json.dump(obj, f, indent=indent, default=_default)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(json_sanitize(obj), f, indent=indent, default=_default, allow_nan=False)

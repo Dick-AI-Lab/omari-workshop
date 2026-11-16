@@ -1,5 +1,21 @@
 # Research and technical audit
 
+> **Update 2026-11-14 (post-training).** Sections 1–9 below are the **pre-training** audit from 2026-11-04, kept as a historical record. The statements in them that are now outdated are marked *[superseded]* inline. Section 0 summarises what changed. The full post-training audit is `docs/POST_TRAINING_AUDIT_2026-11-14.md`. Verified results are in `docs/VALIDATION_REPORT.md` (Part A) and the README.
+
+## 0. What changed after training (2026-11-10 → 2026-11-14)
+
+| Topic | Pre-training statement | Now (verified from artifacts) |
+|---|---|---|
+| Models trained | None | 38 runs in Colab (T4), 5.14 GPU-h measured; metrics recompute exactly from predictions |
+| Results | None | Fine-tuned test macro-F1 0.9425 (DenseNet-161), 0.9410 (ViT-B/16), 0.9416 ± 0.0023 (USF-MAE, 3 seeds). Statistically indistinguishable (Holm-adjusted McNemar p = 1) |
+| USF-MAE checkpoint | 100-epoch release specified | **500-epoch checkpoint used for all USF-MAE runs** and adopted as official (sha256 `c659a06170b0f6967ae7f6d066681b8dea2c122a5f325bb8a82df11ffb3a2533`). 100ep (`f815c629…75ccb66`) is historical, used only for the original reconstructions |
+| Checkpoint contents (open question 1) | Unverified | Both checkpoints contain encoder and decoder; authentic reconstructions are possible from either |
+| Class counts | Transcribed from the paper | Recomputed from the CSV and identical: 711 / 3,092 / 1,040 / 1,718 / 1,626 / 4,213 |
+| Machines | "3× Voluson E6, Voluson S8, Voluson S10, Aloka" (paper) | The CSV has the categories Aloka, Voluson E6, Voluson S10 and Other (no S8 category). Voluson S10: 11 train / 0 val / 1,071 test images |
+| Near-duplicates | Expected to be rare across a patient-level split | 2,685 train/val↔test pairs at dHash ≤ 4 (all different patients; loose detector, 34% label-discordant; no visible accuracy inflation) |
+| Resource estimates (§8) | 0.5–2 GPU-h per run | 14–25 min per full-data run on a T4; 72 MB bundle |
+| Gradient-weighted rollout method id | `chefer` | Renamed `grad_rollout` in the corrected bundle (schema 1.1) |
+
 Phase 1 of the build: what was verified before implementation, how, and the decisions that followed.
 Audit date: 4 November 2026. Every item is marked **verified** (checked against a primary source or by running code), **reported** (taken from a publication and not independently re-derived), or **unverified / blocked**.
 
@@ -9,7 +25,7 @@ Audit date: 4 November 2026. Every item is marked **verified** (checked against 
 |---|---|
 | Compute | 2 CPU cores, ~7–8 GB RAM, **no GPU** |
 | Network | PyPI, npm, GitHub (git and REST API) reachable. **Blocked:** zenodo.org, huggingface.co, download.pytorch.org, drive.google.com, storage.googleapis.com, CDNs |
-| Consequence | FETAL_PLANES_DB, the USF-MAE checkpoint, torchvision DenseNet-161 weights and timm ViT weights **could not be downloaded here**. No model was trained on real data, and no authentic model output exists in this repository. |
+| Consequence | FETAL_PLANES_DB, the USF-MAE checkpoint, torchvision DenseNet-161 weights and timm ViT weights **could not be downloaded here**. No model was trained on real data, and no authentic model output exists in this repository. *[superseded: see §0]* |
 | Installed for validation | torch 2.15 (CPU), torchvision 0.29, timm 1.0.31, scikit-learn 1.9, Node 22, Vite 5, React 18, D3 7, KaTeX 0.16 |
 
 ## 2. FETAL_PLANES_DB
@@ -21,7 +37,7 @@ Audit date: 4 November 2026. Every item is marked **verified** (checked against 
 | 12,400 images, 1,792 patients, 2 hospitals (BCNatal: Hospital Clínic, Hospital Sant Joan de Déu), labelled by an expert maternal–fetal clinician | reported | Burgos-Artizzu et al., Sci. Rep. 10:10200 (2020) |
 | 6 classes: fetal abdomen, brain, femur, thorax; maternal cervix; other. Brain images sub-labelled trans-thalamic / trans-cerebellum / trans-ventricular | reported | same |
 | Split: patients ordered chronologically by first visit; first half train (7,129 images, 896 patients), second half test (5,271 images, 896 patients); 10% of train held out for validation | reported | same (Methods) |
-| Machines: 3× Voluson E6, Voluson S8, Voluson S10 (GE), Aloka; "several operators with similar experience" | reported | same |
+| Machines: 3× Voluson E6, Voluson S8, Voluson S10 (GE), Aloka; "several operators with similar experience" | reported (the CSV uses Aloka / Voluson E6 / Voluson S10 / Other, see §0) | same |
 | Released as uncompressed greyscale PNG, DICOM headers removed | reported | same |
 | Metadata CSV `FETAL_PLANES_DB_data.csv`, **semicolon-separated**, columns `Image_name; Patient_num; Plane; Brain_plane; Operator; US_Machine; Train` (trailing space in `Train `), image names like `Patient00001_Plane1_1_of_15` | verified indirectly (printed output of a public third-party notebook) | github.com/alejandroribero1/clasificacion-planos-fetales-ultrasonido |
 | Per-class counts: abdomen 711, brain 3,092, femur 1,040, thorax 1,718, cervix 1,626, other 4,213 | reported (Table 1, transcribed). Cross-checks: the sum is 12,400; "Other = 4,213" and the brain sub-plane total of 2,949 (1,543 train + 1,406 test) appear in the paper text | Notebook 01 recomputes these from the CSV and the website then prefers the computed values |
@@ -41,7 +57,7 @@ Repository inspected by cloning https://github.com/Yusufii9/USF-MAE (MIT licence
 | Pretraining preprocessing (`US_data_loading.py`): `Resize((224,224), NEAREST)` without aspect preservation, ImageNet mean/std, RGB; augmentation: rotation 0–90°, H/V flips, RandomResizedCrop(scale 0.5–2.0) | verified |
 | Optimisation: AdamW, lr ∈ {3e-4, 1e-3} × 128/256, weight decay ∈ {0.01, 0.05}, 100 epochs, warm-up + half-cosine, bf16 autocast, grad clip 1.0, 5-fold CV | verified |
 | Pretraining corpus OpenUS-46 (~370k images, 46 datasets). **FETAL_PLANES_DB is dataset 25 of OpenUS-46** | verified (README table) |
-| 100-epoch checkpoint: Google Drive id `1ZPu_7KhMEuaq-XdLhVp2EEgMgLJ4dKhr`; 500-epoch: `15n71qHXSBjEjrLtCOzvBb6gTsGhh7NUg` | verified (README links). **Download blocked here**, so checkpoint contents (container format, decoder presence) are **unverified** |
+| 100-epoch checkpoint: Google Drive id `1ZPu_7KhMEuaq-XdLhVp2EEgMgLJ4dKhr`; 500-epoch: `15n71qHXSBjEjrLtCOzvBb6gTsGhh7NUg` | verified (README links). *[Pre-training note, superseded 2026-11-14: download was blocked in the original build environment. Both checkpoints have since been obtained and inspected: plain state dicts with full encoder + decoder (254 tensors); sha256 pinned in `python/omari_us/models/usf_mae.py`. 500ep is the official model, see §0.]* |
 | Reported downstream results: BUS-BRA, MMOTU-2D, GIST514-DB (F1 81.6 / 79.6 / 82.4%). **No FETAL_PLANES_DB downstream result is reported** | verified (README, abstract) |
 | `norm_pix_loss`: the builder default in the MAE code is `False`, and the notebook does not override it | verified by reading the call; the MAE source itself was not vendored |
 
@@ -97,14 +113,14 @@ The trust caveat from *Building Blocks* runs through Chapters 5 and 6: interface
 |---|---|---|
 | FETAL_PLANES_DB images and metadata | CC BY 4.0 | Not redistributed in the repo. Exported sample PNGs in `website/public/experiments/` are allowed with attribution (attribution is in the website footer and the manifest) |
 | USF-MAE code | MIT | Not copied. Re-implemented model with compatible keys; checkpoint downloaded by the user |
-| USF-MAE checkpoints | Not stated separately in the README; distributed for research | Not redistributed |
+| USF-MAE checkpoints | Not stated separately in the README; distributed for research. Initialised from Facebook MAE weights (CC BY-NC 4.0), so they **may inherit a non-commercial restriction** (added 2026-11-14) | Not redistributed |
 | facebookresearch/mae | CC BY-NC 4.0 | **Not vendored** (to avoid the NC restriction); only the published algorithm is re-implemented |
 | torchvision weights | BSD-3 (code); ImageNet terms apply to weights | Downloaded at run time |
 | timm `augreg_in1k` | Apache-2.0 (per timm config) | Downloaded at run time |
 | Fonts (Source Serif 4, IBM Plex) | SIL OFL 1.1 | Bundled via @fontsource |
 | KaTeX, D3, React | MIT / ISC | npm dependencies |
 
-## 8. Resource requirements (estimates, not measurements)
+## 8. Resource requirements (estimates, not measurements) *[superseded by measurements: 5.14 GPU-h for 38 runs, 14–25 min per full-data run on a T4; 72 MB bundle]*
 
 - **Training.** Each model × regime (`full` mode, 25 epochs, ~6.4k training images) is roughly 0.5–2 GPU-hours on a T4. The label-efficiency sweep (6 fractions × 3 seeds × 3 models, frozen regime) adds about 54 short runs. These timings are extrapolated from typical ViT-B/DenseNet-161 throughput, not measured.
 - **Export bundle.** ~20 samples with full attributions, perturbations and attention is estimated at 30–80 MB, and ~15–30 min on a GPU.
@@ -112,7 +128,7 @@ The trust caveat from *Building Blocks* runs through Chapters 5 and 6: interface
 
 ## 9. Open questions for the presenter
 
-1. **USF-MAE checkpoint container.** Does it include decoder weights? This determines whether authentic reconstructions can be shown.
+1. **USF-MAE checkpoint container.** Does it include decoder weights? This determines whether authentic reconstructions can be shown. *[answered: yes, for both 100ep and 500ep]*
 2. **Reporting the FETAL_PLANES_DB pretraining overlap.** Should a FETAL_PLANES_DB-excluded USF-MAE variant be used, if one exists?
 3. **Fine-tuning head for USF-MAE.** Token pooling (default; same as the supervised ViT) or MAE's average pooling + `fc_norm`?
 4. **MetaCAM++.** Reference implementation and the information to show in Chapter 5.

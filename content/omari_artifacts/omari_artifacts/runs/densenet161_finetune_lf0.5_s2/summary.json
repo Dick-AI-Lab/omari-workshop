@@ -1,0 +1,173 @@
+{
+  "run": "densenet161_finetune_lf0.5_s2",
+  "best_epoch": 4,
+  "best_val_macro_f1": 0.9523205396075481,
+  "test": {
+    "confusion": [
+      [
+        344,
+        0,
+        0,
+        2,
+        0,
+        12
+      ],
+      [
+        4,
+        1463,
+        0,
+        1,
+        2,
+        2
+      ],
+      [
+        2,
+        0,
+        494,
+        1,
+        0,
+        27
+      ],
+      [
+        3,
+        0,
+        0,
+        618,
+        0,
+        39
+      ],
+      [
+        1,
+        0,
+        0,
+        0,
+        643,
+        1
+      ],
+      [
+        57,
+        17,
+        114,
+        77,
+        5,
+        1342
+      ]
+    ],
+    "accuracy": 0.9303737431227471,
+    "macro_f1": 0.9242573428848125,
+    "balanced_accuracy": 0.9438828134267764,
+    "per_class": [
+      {
+        "precision": 0.8369829683698297,
+        "recall": 0.9608938547486033,
+        "f1": 0.8946684005201561,
+        "support": 358
+      },
+      {
+        "precision": 0.9885135135135135,
+        "recall": 0.9938858695652174,
+        "f1": 0.9911924119241192,
+        "support": 1472
+      },
+      {
+        "precision": 0.8125,
+        "recall": 0.9427480916030534,
+        "f1": 0.872791519434629,
+        "support": 524
+      },
+      {
+        "precision": 0.8841201716738197,
+        "recall": 0.9363636363636364,
+        "f1": 0.9094922737306844,
+        "support": 660
+      },
+      {
+        "precision": 0.9892307692307692,
+        "recall": 0.9968992248062015,
+        "f1": 0.993050193050193,
+        "support": 645
+      },
+      {
+        "precision": 0.9430780042164442,
+        "recall": 0.8325062034739454,
+        "f1": 0.884349258649094,
+        "support": 1612
+      }
+    ]
+  },
+  "n_train_images": 2965,
+  "n_train_patients": 406,
+  "init_source": "torchvision DenseNet161_Weights.IMAGENET1K_V1",
+  "checkpoint_sha256": "8507589768afd480ae0f4f8b31075ae8f7d1ba25b061c11664573d2fee218bab",
+  "config": {
+    "model": "densenet161",
+    "regime": "finetune",
+    "epochs": 25,
+    "batch_size": 32,
+    "lr": 0.0003,
+    "weight_decay": 0.0001,
+    "warmup_epochs": 1,
+    "layer_decay": 0.75,
+    "backbone_lr_mult": 0.1,
+    "loss": "weighted_ce",
+    "weight_scheme": "inverse",
+    "label_smoothing": 0.1,
+    "focal_gamma": 2.0,
+    "label_fraction": 0.5,
+    "seed": 2,
+    "num_workers": 2,
+    "amp": true,
+    "patience": 6,
+    "usf_mae_checkpoint": null,
+    "usf_mae_global_pool": "token",
+    "input_overrides": {
+      "size": 224,
+      "resize": "stretch",
+      "interpolation": "bilinear",
+      "mean": [
+        0.485,
+        0.456,
+        0.406
+      ],
+      "std": [
+        0.229,
+        0.224,
+        0.225
+      ]
+    },
+    "augment": {
+      "rotation": 10,
+      "scale": [
+        0.85,
+        1.0
+      ],
+      "hflip": 0.5,
+      "brightness": 0.15,
+      "contrast": 0.15
+    },
+    "max_train_batches": null,
+    "max_eval_batches": null,
+    "out_dir": "/content/drive/MyDrive/omari_artifacts/runs",
+    "run_name": null,
+    "pretrained": true
+  },
+  "input": {
+    "size": 224,
+    "resize": "stretch",
+    "interpolation": "bilinear",
+    "mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "std": [
+      0.229,
+      0.224,
+      0.225
+    ],
+    "channels": 3
+  },
+  "finished": "2026-11-11T03:00:14+00:00",
+  "git_commit": null,
+  "demo_mode": false
+}

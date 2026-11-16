@@ -1,0 +1,173 @@
+{
+  "run": "vit_b16_frozen_lf1_s0",
+  "best_epoch": 12,
+  "best_val_macro_f1": 0.8569399186424977,
+  "test": {
+    "confusion": [
+      [
+        319,
+        0,
+        7,
+        21,
+        0,
+        11
+      ],
+      [
+        32,
+        1372,
+        43,
+        17,
+        5,
+        3
+      ],
+      [
+        18,
+        1,
+        476,
+        6,
+        1,
+        22
+      ],
+      [
+        48,
+        0,
+        16,
+        570,
+        2,
+        24
+      ],
+      [
+        1,
+        0,
+        0,
+        0,
+        643,
+        1
+      ],
+      [
+        219,
+        11,
+        271,
+        156,
+        6,
+        949
+      ]
+    ],
+    "accuracy": 0.8212862834376778,
+    "macro_f1": 0.803803524011066,
+    "balanced_accuracy": 0.8634614803886794,
+    "per_class": [
+      {
+        "precision": 0.5007849293563579,
+        "recall": 0.8910614525139665,
+        "f1": 0.6412060301507537,
+        "support": 358
+      },
+      {
+        "precision": 0.9913294797687862,
+        "recall": 0.9320652173913043,
+        "f1": 0.9607843137254901,
+        "support": 1472
+      },
+      {
+        "precision": 0.5854858548585485,
+        "recall": 0.9083969465648855,
+        "f1": 0.7120418848167538,
+        "support": 524
+      },
+      {
+        "precision": 0.7402597402597403,
+        "recall": 0.8636363636363636,
+        "f1": 0.7972027972027972,
+        "support": 660
+      },
+      {
+        "precision": 0.9786910197869102,
+        "recall": 0.9968992248062015,
+        "f1": 0.9877112135176651,
+        "support": 645
+      },
+      {
+        "precision": 0.9396039603960396,
+        "recall": 0.5887096774193549,
+        "f1": 0.7238749046529367,
+        "support": 1612
+      }
+    ]
+  },
+  "n_train_images": 6425,
+  "n_train_patients": 809,
+  "init_source": "timm vit_base_patch16_224.augreg_in1k",
+  "checkpoint_sha256": "81d5e57dbbb2c1635a6025aaf6f5c7ce6b75a73ab9c3a119fcfd7ed903f83239",
+  "config": {
+    "model": "vit_b16",
+    "regime": "frozen",
+    "epochs": 15,
+    "batch_size": 64,
+    "lr": 0.001,
+    "weight_decay": 0.0,
+    "warmup_epochs": 1,
+    "layer_decay": 0.75,
+    "backbone_lr_mult": 0.1,
+    "loss": "weighted_ce",
+    "weight_scheme": "inverse",
+    "label_smoothing": 0.1,
+    "focal_gamma": 2.0,
+    "label_fraction": 1.0,
+    "seed": 0,
+    "num_workers": 2,
+    "amp": true,
+    "patience": 6,
+    "usf_mae_checkpoint": null,
+    "usf_mae_global_pool": "token",
+    "input_overrides": {
+      "size": 224,
+      "resize": "stretch",
+      "interpolation": "bicubic",
+      "mean": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "std": [
+        0.5,
+        0.5,
+        0.5
+      ]
+    },
+    "augment": {
+      "rotation": 10,
+      "scale": [
+        0.85,
+        1.0
+      ],
+      "hflip": 0.5,
+      "brightness": 0.15,
+      "contrast": 0.15
+    },
+    "max_train_batches": null,
+    "max_eval_batches": null,
+    "out_dir": "/content/drive/MyDrive/omari_artifacts/runs",
+    "run_name": null,
+    "pretrained": true
+  },
+  "input": {
+    "size": 224,
+    "resize": "stretch",
+    "interpolation": "bicubic",
+    "mean": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "std": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "channels": 3
+  },
+  "finished": "2026-11-11T15:10:54+00:00",
+  "git_commit": null,
+  "demo_mode": false
+}

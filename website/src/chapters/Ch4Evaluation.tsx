@@ -1,6 +1,6 @@
 import { ChapterHead } from '../components/shell';
 import { Ask, Code, Deep, Tex } from '../components/ui';
-import { CalibrationLab, DomainShiftTable, EvaluationSummary, LearningCurves, PrevalenceSimulator, ThresholdLab } from '../visualizations/EvalLab';
+import { CalibrationLab, DomainShiftTable, EvalOverlapNote, EvaluationSummary, LearningCurves, PrevalenceSimulator, SeedSpread, ThresholdLab } from '../visualizations/EvalLab';
 
 export default function Ch4Evaluation() {
   return (
@@ -10,7 +10,7 @@ export default function Ch4Evaluation() {
 
       <h3>Adapting a pretrained encoder</h3>
       <p>
-        Every model gets a new linear head, <Tex>{'\\mathbb{R}^{D}\\to\\mathbb{R}^{6}'}</Tex>. In <b>linear probing</b> the encoder is frozen, so the result measures how linearly separable the planes already are in the pretrained representation. This is the cleanest comparison of what pretraining learned. In <b>full fine-tuning</b> every weight moves; it usually performs better but mixes the effect of pretraining with that of optimisation. We run both, with identical patient-disjoint splits, the same class-weighted loss and model selection by validation macro-F1. Learning rates, schedules and input transforms follow each model’s established recipe rather than a single setting that would favour one of them.
+        Every model gets a new linear head, <Tex>{'\\mathbb{R}^{D}\\to\\mathbb{R}^{6}'}</Tex>. In <b>linear probing</b> the encoder is frozen, so the result measures how linearly separable the planes already are in the pretrained representation. This is the cleanest comparison of what pretraining learned. In <b>full fine-tuning</b> every weight moves; it usually performs better but mixes the effect of pretraining with that of optimisation. Linear probes were run once per model at 100% labels; the label-efficiency sweep below uses full fine-tuning. Both use identical patient-disjoint splits, the same class-weighted loss and model selection by validation macro-F1. Learning rates, schedules and input transforms follow each model’s established recipe rather than a single setting that would favour one of them.
       </p>
       <Deep kind="math">
         <p>Class-weighted cross-entropy with label smoothing <Tex>\varepsilon</Tex>, and the focal-loss alternative:</p>
@@ -30,6 +30,8 @@ result = train(cfg, splits="artifacts/splits/split_manifest.csv", data_root=DATA
 
       <h3>What the test set says</h3>
       <EvaluationSummary />
+      <EvalOverlapNote />
+      <SeedSpread />
       <p>
         Accuracy is dominated by the large classes. <b>Macro-F1</b> averages per-class F1, so the 711-image abdomen class counts as much as the 4,213-image “Other”. Look at the off-diagonal cells: confusions between abdomen and thorax, both axial trunk sections, are anatomically understandable. Confusions involving “Other” often reflect label ambiguity as much as model error.
       </p>
@@ -37,15 +39,15 @@ result = train(cfg, splits="artifacts/splits/split_manifest.csv", data_root=DATA
       <PrevalenceSimulator />
       <CalibrationLab />
       <Deep kind="math">
-        <Tex display>{'\\mathrm{ECE} = \\sum_{b=1}^{B}\\frac{|S_b|}{n}\\,\\Big|\\,\\mathrm{acc}(S_b) - \\mathrm{conf}(S_b)\\Big|,\\qquad \\hat p_i(T) = \\mathrm{softmax}(z_i / T),\\ \\ T^\\star = \\arg\\min_T \\mathrm{NLL}_\\text{val}(T)'}</Tex>
+        <Tex display>{'\\begin{gathered} \\mathrm{ECE} = \\sum_{b=1}^{B}\\frac{|S_b|}{n}\\,\\Big|\\,\\mathrm{acc}(S_b) - \\mathrm{conf}(S_b)\\Big| \\\\ \\hat p_i(T) = \\mathrm{softmax}(z_i / T),\\qquad T^\\star = \\arg\\min_T \\mathrm{NLL}_\\text{val}(T) \\end{gathered}'}</Tex>
       </Deep>
 
       <h3>When labels are scarce, and when the scanner changes</h3>
       <LearningCurves />
       <DomainShiftTable />
-      <Ask q="USF-MAE is best at 5% labels but ties DenseNet at 100%. What can we conclude?"
-        options={['Self-supervision is useless with enough data', 'Domain pretraining mainly buys label efficiency', 'The ViT architecture is better', 'Nothing without CIs and the overlap caveat']} multi
-        reveal={<>If (and only if) the experiment shows that pattern with non-overlapping uncertainty across seeds, the defensible reading is that the ultrasound-pretrained representation mainly reduces the labels needed. That is a valuable property for new planes or rare anomalies. Two qualifiers must travel with it. The models differ in more than pretraining data (architecture, objective, augmentation), and USF-MAE’s pretraining corpus included FETAL_PLANES_DB images. Treat the result as hypothesis-generating until it is confirmed on an external dataset.</>} />
+      <Ask q="Compare the label-efficiency curves with the full-label results above. What can we conclude?"
+        options={['Self-supervision is useless with enough data', 'Domain pretraining may mainly buy label efficiency', 'The ViT architecture is better', 'Nothing firm without seeds, CIs and the overlap caveat']} multi
+        reveal={<>Read the chart, not the headline. At 100% labels the three models are statistically indistinguishable on this test set. Where USF-MAE sits above DenseNet-161 at small label fractions, and the seed spreads do not overlap, the defensible reading is that the ultrasound-pretrained representation <i>may</i> reduce the labels needed, a valuable property for new planes or rare anomalies. Three qualifiers must travel with it: the models differ in architecture, pretraining data and fine-tuning recipe, not in one factor; without ViT-B/16, the architecture-matched control, at the same low label fractions (the chart shows whether it was run), the effect of ultrasound pretraining cannot be separated from the architecture; and USF-MAE’s pretraining corpus included FETAL_PLANES_DB images. Treat the result as suggestive and hypothesis-generating until it is confirmed on an external dataset.</>} />
     </section>
   );
 }

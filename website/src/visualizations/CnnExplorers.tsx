@@ -1,3 +1,4 @@
+import { layerShort } from '../data/labels';
 import { useEffect, useMemo, useState } from 'react';
 import { ImagePicker } from '../components/ImagePicker';
 import { Empty, Figure, GrayCanvas, Seg, Slider, fmtInt, fmtM } from '../components/ui';
@@ -146,7 +147,7 @@ function useFeatureTiles(layer?: FeatureLayer) {
     let c = false;
     setTiles([]);
     if (!layer) return;
-    Promise.all(layer.channels.map((ch) => loadGrayPNG(ch.png))).then((t) => !c && setTiles(t)).catch(() => {});
+    Promise.all(layer.channels.map((ch) => loadGrayPNG(ch.png))).then((t) => !c && setTiles(t)).catch((e) => console.error('[features]', layer.layer, e));
     return () => { c = true; };
   }, [layer]);
   return tiles;
@@ -174,7 +175,7 @@ export function DenseNetActivations() {
     <Figure title="Real DenseNet-161 feature maps" prov="model" provDetail={`${model?.checkpoint_id ?? ''}`}
       caption={<>Channels from <code>{layer.layer}</code> (tensor {layer.shape.join('×')}), selected by: {layer.selection}. Each tile is min–max scaled independently. Early layers respond to edges and speckle texture; deeper layers are coarser and more class-selective, but individual channels are rarely interpretable on their own.</>}>
       <ImagePicker compact />
-      <Seg label="Layer" value={li} onChange={setLi} options={layers.map((l, i) => ({ value: i, label: l.layer.replace('features.', '') }))} />
+      <Seg label="Depth (shallow → deep)" value={li} onChange={setLi} options={layers.map((l, i) => ({ value: i, label: `${layerShort(l.layer)} · ${l.shape.slice(1).join('×')}` }))} />
       <div className="grid-4" style={{ marginTop: '0.8rem', gridTemplateColumns: 'repeat(auto-fill, minmax(7rem, 1fr))' }}>
         {tiles.map((t, i) => <GrayCanvas key={i} img={t} cmap="inferno" pixelated label={`#${layer.channels[i].index}`} />)}
       </div>
