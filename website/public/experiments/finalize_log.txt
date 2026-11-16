@@ -1,0 +1,5 @@
+[copy] D:\Canada\BORN-CHEO RI Work\OMARI Workshop\omari-workshop\content\omari_artifacts\omari_artifacts\website_bundle -> D:\Canada\BORN-CHEO RI Work\OMARI Workshop\omari-workshop\website\public\experiments (5 files updated)
+[pred] Patient01444_Plane1_16_of_28/usf_mae: argmax 0 (640px PNG) -> 5 (npz, original image)
+[pred] Patient01543_Plane2_3_of_3/usf_mae: argmax 5 (640px PNG) -> 0 (npz, original image)
+[pred] 2 sample argmax changes after switching to npz predictions
+[done] 2026-11-14T11:17:45+00:00

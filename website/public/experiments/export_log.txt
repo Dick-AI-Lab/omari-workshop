@@ -1,0 +1,4 @@
+[ok] densenet161: /content/drive/MyDrive/omari_artifacts/runs/densenet161_finetune_lf1_s0/best.pt (init: torchvision DenseNet161_Weights.IMAGENET1K_V1)
+[ok] vit_b16: /content/drive/MyDrive/omari_artifacts/runs/vit_b16_finetune_lf1_s0/best.pt (init: timm vit_base_patch16_224.augreg_in1k)
+[ok] usf_mae: /content/drive/MyDrive/omari_artifacts/runs/usf_mae_finetune_lf1_s0/best.pt (init: USF-MAE encoder usf_mae_500ep.pth sha256:c659a06170b0)
+[samples] 24 selected
